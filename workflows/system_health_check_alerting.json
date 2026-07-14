@@ -1,0 +1,150 @@
+{
+  "name": "System Health Check & Alerting",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "value": [
+            {
+              "mode": "everyMinute",
+              "interval": 15
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+      "name": "Cron Trigger (15m)",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com",
+        "options": {}
+      },
+      "id": "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
+      "name": "Check Backend API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        470,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 1 as db_active;"
+      },
+      "id": "c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f",
+      "name": "Check Postgres Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        470,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dummy_postgres_credential_id",
+          "name": "Production Database"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $('Check Backend API').first();\nconst dbResponse = $('Check Postgres Database').first();\n\nconst apiOk = apiResponse && apiResponse.json && apiResponse.json.current_user_url !== undefined;\nconst dbOk = dbResponse && dbResponse.json && dbResponse.json.db_active === 1;\n\nif (!apiOk) {\n  throw new Error('API Health Check Failed: Endpoint did not return expected response properties.');\n}\n\nif (!dbOk) {\n  throw new Error('Database Health Check Failed: Database connection or query failed.');\n}\n\nreturn {\n  json: {\n    status: \"healthy\",\n    api_check: \"passed\",\n    db_check: \"passed\",\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a",
+      "name": "Evaluate Health Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.placeholder/services/T00000000/B00000000/ZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\": \"✅ System health checks passed successfully at {{ $json.timestamp }}. API and Database are fully operational.\"}",
+        "options": {}
+      },
+      "id": "e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b",
+      "name": "Slack Success Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        960,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Cron Trigger (15m)": {
+      "main": [
+        [
+          {
+            "node": "Check Backend API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Postgres Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Backend API": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Health Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Postgres Database": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Health Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Health Metrics": {
+      "main": [
+        [
+          {
+            "node": "Slack Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "errorWorkflow": "e2c342f0-104c-4a37-b4d4-5397f0a71ad1"
+  },
+  "meta": {
+    "instanceId": "cb321a50a00632a7bb7d5d2ab0724806a77ad2f254b1f8ebf9bf6e72c842b104"
+  }
+}
