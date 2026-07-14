@@ -1,0 +1,258 @@
+{
+  "name": "Lead Generation & CRM Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-webhook",
+        "options": {}
+      },
+      "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = items[0].json;\n\n// Basic data cleaning and validation\nconst cleanName = (item.name || 'Anonymous').trim().replace(/\\b\\w/g, c => c.toUpperCase());\nconst cleanEmail = (item.email || '').trim().toLowerCase();\nconst cleanCompany = (item.company || 'Self-Employed').trim();\nconst cleanPhone = (item.phone || '').replace(/[^0-9+]/g, '');\n\nif (!cleanEmail.includes('@')) {\n  throw new Error('Invalid email address format.');\n}\n\nreturn {\n  json: {\n    original_data: item,\n    lead: {\n      name: cleanName,\n      email: cleanEmail,\n      company: cleanCompany,\n      phone: cleanPhone,\n      message: item.message || ''\n    }\n  }\n};"
+      },
+      "id": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e",
+      "name": "Validate & Format Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        470,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.hubapi.com/crm/v3/objects/contacts/{{ $json.lead.email }}",
+        "sendQueryParameters": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "idProperty",
+              "value": "email"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_API_KEY || 'dummy_api_key' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
+      "name": "Find HubSpot Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        690,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "type": "string"
+          },
+          "conditions": [
+            {
+              "id": "52857dfa-beee-436d-b8bc-bf684b39b56f",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": "isEmpty"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4d5e6f7a-8b9c-0d1e-2f3a-4b5c6d7e8f9a",
+      "name": "Router: Existing Contact?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        910,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_API_KEY || 'dummy_api_key' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"properties\": {\"email\": \"{{ $('Validate & Format Data').item.json.lead.email }}\", \"firstname\": \"{{ $('Validate & Format Data').item.json.lead.name.split(' ')[0] }}\", \"lastname\": \"{{ $('Validate & Format Data').item.json.lead.name.split(' ').slice(1).join(' ') }}\", \"company\": \"{{ $('Validate & Format Data').item.json.lead.company }}\", \"phone\": \"{{ $('Validate & Format Data').item.json.lead.phone }}\"}}",
+        "options": {}
+      },
+      "id": "5e6f7a8b-9c0d-1e2f-3a4b-5c6d7e8f9a0b",
+      "name": "Create HubSpot Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1150,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.hubapi.com/crm/v3/objects/contacts/{{ $json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_API_KEY || 'dummy_api_key' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"properties\": {\"phone\": \"{{ $('Validate & Format Data').item.json.lead.phone }}\", \"company\": \"{{ $('Validate & Format Data').item.json.lead.company }}\"}}",
+        "options": {}
+      },
+      "id": "6f7a8b9c-0d1e-2f3a-4b5c-6d7e8f9a0b1c",
+      "name": "Update HubSpot Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1150,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.placeholder/services/T00000000/B00000000/YYYYYYYYYYYYYYYYYYYYYYYY",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\": \"🎉 New Lead Processed!\\n*Name:* {{ $('Validate & Format Data').item.json.lead.name }}\\n*Email:* {{ $('Validate & Format Data').item.json.lead.email }}\\n*Company:* {{ $('Validate & Format Data').item.json.lead.company }}\\n*Status:* {{ $node['Router: Existing Contact?'].active ? 'New Contact Created' : 'Existing Contact Updated' }}\"}",
+        "options": {}
+      },
+      "id": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
+      "name": "Slack Lead Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1400,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate & Format Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Format Data": {
+      "main": [
+        [
+          {
+            "node": "Find HubSpot Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find HubSpot Contact": {
+      "main": [
+        [
+          {
+            "node": "Router: Existing Contact?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router: Existing Contact?": {
+      "main": [
+        [
+          {
+            "node": "Create HubSpot Contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update HubSpot Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create HubSpot Contact": {
+      "main": [
+        [
+          {
+            "node": "Slack Lead Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update HubSpot Contact": {
+      "main": [
+        [
+          {
+            "node": "Slack Lead Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "errorWorkflow": "e2c342f0-104c-4a37-b4d4-5397f0a71ad1"
+  },
+  "meta": {
+    "instanceId": "cb321a50a00632a7bb7d5d2ab0724806a77ad2f254b1f8ebf9bf6e72c842b104"
+  }
+}
