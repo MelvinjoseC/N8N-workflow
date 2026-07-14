@@ -1,0 +1,119 @@
+version: '3.8'
+
+networks:
+  n8n-network:
+    driver: bridge
+
+volumes:
+  db_storage:
+    name: n8n_db_storage
+  n8n_storage:
+    name: n8n_data_storage
+  redis_storage:
+    name: n8n_redis_storage
+  db_backups:
+    name: n8n_db_backups
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: n8n-postgres
+    restart: always
+    environment:
+      - POSTGRES_DB=${DB_POSTGRESDB_DATABASE:-n8n_db}
+      - POSTGRES_USER=${DB_POSTGRESDB_USER:-n8n_user}
+      - POSTGRES_PASSWORD=${DB_POSTGRESDB_PASSWORD:-secure-db-password-change-me}
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - n8n-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: n8n-redis
+    restart: always
+    command: redis-server --requirepass ${QUEUE_BULL_REDIS_PASSWORD:-secure-redis-password-change-me}
+    volumes:
+      - redis_storage:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${QUEUE_BULL_REDIS_PASSWORD:-secure-redis-password-change-me}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - n8n-network
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-app
+    restart: always
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - NODE_ENV=${NODE_ENV:-production}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-UTC}
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE:-true}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB_DATABASE:-n8n_db}
+      - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER:-n8n_user}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
+      - EXECUTIONS_MODE=${EXECUTIONS_MODE:-regular}
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      - QUEUE_BULL_REDIS_PASSWORD=${QUEUE_BULL_REDIS_PASSWORD}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE:-true}
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}
+    volumes:
+      - n8n_storage:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - n8n-network
+
+  # Database backup service to periodically dump the PostgreSQL database
+  db-backup:
+    image: postgres:15-alpine
+    container_name: n8n-db-backup
+    restart: always
+    environment:
+      - PGUSER=${DB_POSTGRESDB_USER:-n8n_user}
+      - PGPASSWORD=${DB_POSTGRESDB_PASSWORD:-secure-db-password-change-me}
+      - PGDATABASE=${DB_POSTGRESDB_DATABASE:-n8n_db}
+      - PGHOST=postgres
+      - BACKUP_INTERVAL=86400 # 24 hours in seconds
+    volumes:
+      - db_backups:/backups
+    entrypoint: |
+      /bin/sh -c '
+      echo "Starting backup service daemon...";
+      while true; do
+        sleep $$BACKUP_INTERVAL;
+        echo "Creating database backup...";
+        FILENAME="/backups/n8n_db_backup_$$(date +%Y%m%d_%H%M%S).sql";
+        pg_dump -h $$PGHOST -U $$PGUSER -d $$PGDATABASE > $$FILENAME;
+        echo "Backup created: $$FILENAME";
+        # Keep only the last 7 backups to save disk space
+        find /backups -name "n8n_db_backup_*.sql" -mtime +7 -delete;
+      done'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - n8n-network
