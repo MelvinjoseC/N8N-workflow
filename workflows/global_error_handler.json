@@ -1,0 +1,145 @@
+{
+  "name": "Global Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e2c342f0-104c-4a37-b4d4-5397f0a71ad1",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        380,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "workflow_id",
+              "value": "={{ $json.workflow.id }}"
+            },
+            {
+              "name": "workflow_name",
+              "value": "={{ $json.workflow.name }}"
+            },
+            {
+              "name": "execution_id",
+              "value": "={{ $json.execution.id }}"
+            },
+            {
+              "name": "error_message",
+              "value": "={{ $json.execution.error.message }}"
+            },
+            {
+              "name": "error_details",
+              "value": "={{ $json.execution.error.stack || 'No stack trace available' }}"
+            },
+            {
+              "name": "execution_url",
+              "value": "={{ $json.execution.url }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.toString() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dcf7a3a0-f38b-4b10-85f7-920cf223af04",
+      "name": "Format Alert Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        600,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.placeholder/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"blocks\": [\n    {\n      \"type\": \"header\",\n      \"text\": {\n        \"type\": \"plain_text\",\n        \"text\": \"🚨 n8n Workflow Execution Failed\",\n        \"emoji\": true\n      }\n    },\n    {\n      \"type\": \"section\",\n      \"fields\": [\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Workflow Name:*\\n{{$json.workflow_name}}\"\n        },\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Workflow ID:*\\n{{$json.workflow_id}}\"\n        }\n      ]\n    },\n    {\n      \"type\": \"section\",\n      \"fields\": [\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Execution ID:*\\n<{{$json.execution_url}}|{{$json.execution_id}}>\"\n        },\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Time:*\\n{{$json.timestamp}}\"\n        }\n      ]\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*Error Message:*\\n`{{$json.error_message}}`\"\n      }\n    },\n    {\n      \"type\": \"divider\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "2701b228-4e89-409e-ba60-39446d37afef",
+      "name": "Slack Alert Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        820,
+        240
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "console.error(`[Error Handler] Workflow ${$json.workflow_name} (ID: ${$json.workflow_id}) failed in execution ${$json.execution_id}.`);\nconsole.error(`Error details: ${$json.error_details}`);\nreturn { success: true };"
+      },
+      "id": "bfd60934-8c88-468e-97c9-f195d51ff6a7",
+      "name": "Log to Console",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Alert Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alert Data": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Alert Webhook": {
+      "main": [
+        [
+          {
+            "node": "Log to Console",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "errorWorkflow": ""
+  },
+  "meta": {
+    "instanceId": "cb321a50a00632a7bb7d5d2ab0724806a77ad2f254b1f8ebf9bf6e72c842b104"
+  }
+}
