@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import re
+import argparse
 
 # Suspected hardcoded credential patterns
 CRED_KEYWORDS = ["key", "secret", "password", "token", "auth", "pwd"]
@@ -39,7 +40,7 @@ def is_hardcoded_secret(value):
 def check_workflow_file(filepath):
     """
     Runs lint checks on a single n8n workflow JSON file.
-    Returns a list of error/warning strings.
+    Returns a list of error strings and a list of warning strings.
     """
     errors = []
     warnings = []
@@ -80,7 +81,17 @@ def check_workflow_file(filepath):
             errors.append(f"Duplicate node name found: '{name}'")
         node_names.add(name)
         
-        # Rule 3: Inspect parameters for hardcoded secrets
+        # Rule 3: Detect disabled nodes (debugging leftovers)
+        if node.get("disabled") is True:
+            warnings.append(f"Node '{name}' is disabled. Verify if it should be removed before production deployment.")
+
+        # Rule 4: Webhook and HTTP authentication warnings
+        if node_type == "n8n-nodes-base.webhook":
+            auth = node.get("parameters", {}).get("authentication", "none")
+            if auth == "none":
+                warnings.append(f"Webhook Node '{name}' does not configure authentication. Webhook will be publicly accessible.")
+        
+        # Rule 5: Inspect parameters for hardcoded secrets
         parameters = node.get("parameters", {})
         
         def inspect_dict(d, path=""):
@@ -101,25 +112,37 @@ def check_workflow_file(filepath):
 
         inspect_dict(parameters)
         
+    # Rule 6: Validate connections (no orphaned or undefined nodes referenced)
+    for source_node, conn_types in connections.items():
+        if source_node not in node_names:
+            errors.append(f"Connections reference a source node '{source_node}' that does not exist in the 'nodes' array.")
+            
+        for conn_type, paths in conn_types.items():
+            for path in paths:
+                for target in path:
+                    target_node = target.get("node")
+                    if target_node and target_node not in node_names:
+                        errors.append(f"Connection from '{source_node}' references target node '{target_node}' which does not exist in the 'nodes' array.")
+
     return errors, warnings
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python lint_workflows.py <path_to_workflow_or_directory>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Lint n8n workflow export files for production readiness.")
+    parser.add_argument("target_path", help="Path to workflow JSON file or directory containing workflow JSON files")
+    parser.add_argument("--fail-on-warnings", action="store_true", help="Fail and return exit code 1 even on warnings")
+    args = parser.parse_args()
         
-    target_path = sys.argv[1]
     files_to_check = []
     
-    if os.path.isfile(target_path):
-        files_to_check.append(target_path)
-    elif os.path.isdir(target_path):
-        for root, _, files in os.walk(target_path):
+    if os.path.isfile(args.target_path):
+        files_to_check.append(args.target_path)
+    elif os.path.isdir(args.target_path):
+        for root, _, files in os.walk(args.target_path):
             for file in files:
                 if file.endswith(".json"):
                     files_to_check.append(os.path.join(root, file))
     else:
-        print(f"Error: Target path '{target_path}' does not exist.")
+        print(f"Error: Target path '{args.target_path}' does not exist.")
         sys.exit(1)
         
     total_errors = 0
@@ -145,8 +168,8 @@ def main():
     print(f"Lint Summary: {total_errors} error(s), {total_warnings} warning(s) found.")
     print("="*40)
     
-    if total_errors > 0:
-        print("\nLinting FAILED. Please resolve errors before committing.")
+    if total_errors > 0 or (args.fail_on_warnings and total_warnings > 0):
+        print("\nLinting FAILED. Please resolve issues.")
         sys.exit(1)
     else:
         print("\nLinting PASSED.")

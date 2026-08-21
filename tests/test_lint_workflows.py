@@ -143,8 +143,86 @@ class TestLintWorkflows(unittest.TestCase):
         filepath = self.create_temp_workflow("hardcoded_secrets", data)
         errors, warnings = lint_workflows.check_workflow_file(filepath)
         self.assertTrue(any("Suspected hardcoded credential" in e for e in errors))
-        # Verify it specifically mentions the keys 'password' and 'nested.secret'
         self.assertTrue(any("parameter 'password'" in e or "parameter 'nested.secret'" in e for e in errors))
+
+    def test_disabled_node_warning(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Disabled Node",
+                    "type": "n8n-nodes-base.set",
+                    "disabled": True
+                }
+            ],
+            "settings": {
+                "errorWorkflow": "some-id"
+            }
+        }
+        filepath = self.create_temp_workflow("disabled_node", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertEqual(len(errors), 0)
+        self.assertTrue(any("Node 'Disabled Node' is disabled" in w for w in warnings))
+
+    def test_webhook_no_auth_warning(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Public Webhook",
+                    "type": "n8n-nodes-base.webhook",
+                    "parameters": {
+                        "authentication": "none"
+                    }
+                }
+            ],
+            "settings": {
+                "errorWorkflow": "some-id"
+            }
+        }
+        filepath = self.create_temp_workflow("webhook_no_auth", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertEqual(len(errors), 0)
+        self.assertTrue(any("Public Webhook' does not configure authentication" in w for w in warnings))
+
+    def test_orphaned_connections_detection(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Node A",
+                    "type": "n8n-nodes-base.start"
+                }
+            ],
+            "connections": {
+                "Node A": {
+                    "main": [
+                        [
+                            {
+                                "node": "NonExistent Node",
+                                "type": "main",
+                                "index": 0
+                            }
+                        ]
+                    ]
+                },
+                "Node B": {
+                    "main": [
+                        [
+                            {
+                                "node": "Node A",
+                                "type": "main",
+                                "index": 0
+                            }
+                        ]
+                    ]
+                }
+            },
+            "settings": {
+                "errorWorkflow": "some-id"
+            }
+        }
+        filepath = self.create_temp_workflow("invalid_connections", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertTrue(any("references target node 'NonExistent Node'" in e for e in errors))
+        self.assertTrue(any("source node 'Node B' that does not exist" in e for e in errors))
 
 if __name__ == "__main__":
     unittest.main()
