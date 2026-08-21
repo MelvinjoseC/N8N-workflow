@@ -43,10 +43,25 @@ We use [Conventional Commits](https://www.conventionalcommits.org/) format to st
 
 ---
 
-## 🧪 Local Testing
+## 🧪 Local Validation & Testing
 
-Before committing, validate your JSON files using the Python linter:
+Before committing, ensure all tests pass and workflow exports are valid:
+
+### 1. Run Python Unit Tests
+We maintain unit tests for our CI/CD orchestration and helper scripts. Run:
 ```bash
+make test
+# OR
+python -m unittest discover -s tests
+```
+
+### 2. Lint Workflow Exports
+Validate workflow JSON exports for hardcoded secrets, duplicate nodes, disabled nodes, and orphaned connections:
+```bash
+make lint
+# OR
 python scripts/lint_workflows.py workflows/
 ```
-The pre-merge check will fail if the script returns a non-zero exit code.
+
+Both tests and linter must return success (exit code 0) for the PR checks to pass.
+

@@ -105,28 +105,42 @@ All workflows in the `workflows/` directory are configured with centralized erro
 
 ---
 
-## 🛠️ Tooling & Validation Script
+## 🛠️ Tooling & Verification
 
-We use a custom, zero-dependency Python script, `scripts/lint_workflows.py`, to parse and lint all workflow exports before they reach staging or production environments.
+We support robust local development validation and automated test suites.
 
-### Linting Rules Checked:
-1. **Secret Scanning:** Scans for parameters matching sensitive keywords (e.g., `key`, `secret`, `password`, `token`) and flags values that look like plain text credentials rather than secure environment references (`{{ $env.VAR }}`).
-2. **Error Handling Presence:** Ensures workflows are registered with a designated `errorWorkflow` to prevent silent failures.
-3. **Naming Conflicts:** Ensures all nodes inside a workflow have unique, descriptive names for proper reference mapping.
+### Local CLI Commands (Makefile)
+Standardize operations via the included `Makefile`:
+- **`make lint`**: Runs custom Python linter over local workflow exports.
+- **`make test`**: Runs unit test suite for Python linter and deployment scripts.
+- **`make up` / `make down`**: Initialize/shutdown local dockerised stack.
+- **`make backup`**: Run Postgres database backup manually.
 
-### How to Run Locally:
+### Workflow Linting (`scripts/lint_workflows.py`)
+Linting rules include:
+1. **Secret Scanning:** Scan for hardcoded plaintext credentials (flags base64/hex, allows expressions like `{{ $env.VAR }}`).
+2. **Error Handler Check:** Ensure workflows designate an `errorWorkflow` to intercept runtime issues.
+3. **Naming Collisions:** Enforce unique, distinct node names.
+4. **Disabled Nodes Check:** Warn on nodes left with `"disabled": true` configuration.
+5. **Connection Validation:** Verify connections do not reference non-existent source/target node names.
+6. **Webhook Auth Warning:** Warn if webhook triggers are fully public without authorization options.
+
+### Unit Test Suites (`tests/`)
+We maintain comprehensive unit test coverage for our scripts using `unittest` and `unittest.mock`:
 ```bash
-python scripts/lint_workflows.py workflows/
+# Run unit tests locally
+python -m unittest discover -s tests
 ```
 
 ---
 
-## 🤖 CI/CD Pipeling GitOps Flow
+## 🤖 CI/CD GitOps Pipeline Flow
 
-This repository leverages GitHub Actions to establish a robust deployment pipeline:
+This repository leverages GitHub Actions to establish robust linting, validation, and deployment pipelines:
 
-### Pull Request / Merge CI (Lint Check)
-Every branch push or Pull Request triggers `.github/workflows/lint-workflows.yml` which executes the Python validator script. Any syntax issue or suspected credential failure blocks the build.
+### 1. Test & Lint Suite (`run-tests.yml` & `lint-workflows.yml`)
+Runs on every Pull Request and Branch Push to execute the python unit tests and run the workflow linter. If tests fail or workflows fail validation, the pipeline is blocked.
 
-### Production CD (Auto-sync)
-Merging into `main` or `master` triggers `.github/workflows/deploy-workflows.yml`. It compares local file states against the target n8n instance API using python orchestration, performing a `PUT` to update existing workflows, or a `POST` to register new ones automatically.
+### 2. Production CD Sync (`deploy-workflows.yml` -> `scripts/deploy_workflows.py`)
+Triggered on merges into `main` or `master` branches targeting workflow file changes. Executes a synchronization script that checks n8n API endpoints, decides whether to execute a `PUT` (for updates) or `POST` (for registering new workflows), and automatically synchronizes git changes to n8n.
+
