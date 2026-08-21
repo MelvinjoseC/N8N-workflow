@@ -73,7 +73,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://hooks.slack.placeholder/services/T00000000/B00000000/ZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "url": "={{ $env.SLACK_WEBHOOK_URL || 'https://hooks.slack.placeholder/services/T00000000/B00000000/ZZZZZZZZZZZZZZZZZZZZZZZZ' }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"text\": \"✅ System health checks passed successfully at {{ $json.timestamp }}. API and Database are fully operational.\"}",
