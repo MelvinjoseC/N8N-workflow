@@ -1,5 +1,3 @@
-version: '3.8'
-
 networks:
   n8n-network:
     driver: bridge
@@ -30,6 +28,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+        reservations:
+          memory: 256M
     networks:
       - n8n-network
 
@@ -45,6 +50,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 64M
     networks:
       - n8n-network
 
@@ -84,6 +96,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2048M
+        reservations:
+          memory: 512M
     networks:
       - n8n-network
 
@@ -115,5 +134,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 64M
     networks:
       - n8n-network
