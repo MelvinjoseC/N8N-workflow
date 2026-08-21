@@ -125,11 +125,21 @@ services:
       while true; do
         sleep $$BACKUP_INTERVAL;
         echo "Creating database backup...";
-        FILENAME="/backups/n8n_db_backup_$$(date +%Y%m%d_%H%M%S).sql";
-        pg_dump -h $$PGHOST -U $$PGUSER -d $$PGDATABASE > $$FILENAME;
-        echo "Backup created: $$FILENAME";
+        FILENAME="/backups/n8n_db_backup_$$(date +%Y%m%d_%H%M%S).sql.gz";
+        if pg_isready -h $$PGHOST -U $$PGUSER -d $$PGDATABASE; then
+          pg_dump -h $$PGHOST -U $$PGUSER -d $$PGDATABASE > /tmp/backup.sql;
+          if [ $$? -eq 0 ]; then
+            gzip -9 -f /tmp/backup.sql;
+            mv /tmp/backup.sql.gz $$FILENAME;
+            echo "Backup created successfully: $$FILENAME";
+          else
+            echo "ERROR: pg_dump failed! Database backup aborted.";
+          fi
+        else
+          echo "ERROR: PostgreSQL is not ready. Database backup aborted.";
+        fi
         # Keep only the last 7 backups to save disk space
-        find /backups -name "n8n_db_backup_*.sql" -mtime +7 -delete;
+        find /backups -name "n8n_db_backup_*.sql.gz" -mtime +7 -delete;
       done'
     depends_on:
       postgres:
