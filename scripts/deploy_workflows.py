@@ -55,7 +55,7 @@ def check_workflow_exists(api_url, headers, workflow_id, timeout=DEFAULT_TIMEOUT
         print(f"Error checking workflow {workflow_id}: {str(e)}")
     return False
 
-def deploy_workflow(api_url, headers, filepath):
+def deploy_workflow(api_url, headers, filepath, dry_run=False):
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             workflow_data = json.load(f)
@@ -84,12 +84,21 @@ def deploy_workflow(api_url, headers, filepath):
     if workflow_id:
         exists = check_workflow_exists(api_url, headers, workflow_id)
         if exists:
+            if dry_run:
+                print(f"[DRY-RUN] Workflow '{name}' (ID: {workflow_id}) exists on target. Would perform UPDATE (PUT).")
+                return True
             print(f"Workflow ID {workflow_id} exists on target. Performing UPDATE (PUT).")
             url = f"{base_url}/workflows/{workflow_id}"
             method = 'PUT'
         else:
+            if dry_run:
+                print(f"[DRY-RUN] Workflow '{name}' (ID: {workflow_id}) not found on target. Would perform CREATE (POST).")
+                return True
             print(f"Workflow ID {workflow_id} not found on target. Creating NEW (POST) with original ID.")
             payload['id'] = workflow_id
+    elif dry_run:
+        print(f"[DRY-RUN] Workflow '{name}' has no ID. Would perform CREATE (POST).")
+        return True
 
     req = urllib.request.Request(
         url,
@@ -118,6 +127,7 @@ def main():
     parser.add_argument("directory", help="Directory containing JSON workflows")
     parser.add_argument("--key-env", default="N8N_API_KEY", help="Environment variable name for API key")
     parser.add_argument("--url-env", default="N8N_API_URL", help="Environment variable name for API URL")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate deployment actions without modifying remote n8n instance")
     args = parser.parse_args()
 
     api_key, api_url = get_api_credentials(args.key_env, args.url_env)
@@ -131,15 +141,16 @@ def main():
     }
 
     workflow_files = glob.glob(os.path.join(args.directory, '*.json'))
-    print(f"Found {len(workflow_files)} workflows to deploy.")
+    mode_str = " (DRY-RUN MODE)" if args.dry_run else ""
+    print(f"Found {len(workflow_files)} workflows to deploy{mode_str}.")
 
     success_count = 0
     for file in workflow_files:
         print(f"\nProcessing {file}...")
-        if deploy_workflow(api_url, headers, file):
+        if deploy_workflow(api_url, headers, file, dry_run=args.dry_run):
             success_count += 1
 
-    print(f"\nDeployment complete: {success_count}/{len(workflow_files)} workflows deployed.")
+    print(f"\nDeployment complete: {success_count}/{len(workflow_files)} workflows processed.")
     if success_count < len(workflow_files):
         sys.exit(1)
     sys.exit(0)
