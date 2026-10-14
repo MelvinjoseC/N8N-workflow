@@ -175,11 +175,6 @@
             "node": "Upload to AWS S3",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Email Invoice to Customer",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
