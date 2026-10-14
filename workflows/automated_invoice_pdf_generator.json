@@ -5,6 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "invoice-trigger",
+        "authentication": "headerAuth",
         "options": {}
       },
       "id": "e1f2g3h4-i5j6-k7l8-m9n0-o1p2q3r4s5t6",
