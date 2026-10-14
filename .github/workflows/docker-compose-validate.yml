@@ -1,0 +1,37 @@
+name: Validate Docker Compose
+on:
+  push:
+    paths:
+      - 'docker-compose.yml'
+      - '.env.example'
+      - '.github/workflows/docker-compose-validate.yml'
+  pull_request:
+    paths:
+      - 'docker-compose.yml'
+      - '.env.example'
+      - '.github/workflows/docker-compose-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-compose:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Environment Template
+      run: cp .env.example .env
+
+    - name: Validate Docker Compose Configuration
+      run: docker compose config --quiet
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Validate Environment Schema
+      run: python scripts/validate_env.py --env-file .env.example --example-file .env.example --allow-placeholders
