@@ -55,7 +55,29 @@ def check_workflow_exists(api_url, headers, workflow_id, timeout=DEFAULT_TIMEOUT
         print(f"Error checking workflow {workflow_id}: {str(e)}")
     return False
 
-def deploy_workflow(api_url, headers, filepath, dry_run=False):
+def backup_remote_workflow(api_url, headers, workflow_id, backup_dir):
+    """
+    Downloads existing remote workflow JSON and saves to backup_dir before overwrite.
+    """
+    if not backup_dir:
+        return None
+    os.makedirs(backup_dir, exist_ok=True)
+    fetch_url = f"{api_url.rstrip('/')}/workflows/{workflow_id}"
+    req = urllib.request.Request(fetch_url, headers=headers, method='GET')
+    try:
+        with make_request(req, timeout=DEFAULT_TIMEOUT) as resp:
+            data = resp.read().decode('utf-8')
+            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            backup_file = os.path.join(backup_dir, f"{workflow_id}_{timestamp}.json")
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                f.write(data)
+            print(f"Pre-deploy backup created: {backup_file}")
+            return backup_file
+    except Exception as e:
+        print(f"Warning: Failed to create pre-deploy backup for {workflow_id}: {e}")
+        return None
+
+def deploy_workflow(api_url, headers, filepath, dry_run=False, backup_dir=None):
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             workflow_data = json.load(f)
@@ -87,6 +109,8 @@ def deploy_workflow(api_url, headers, filepath, dry_run=False):
             if dry_run:
                 print(f"[DRY-RUN] Workflow '{name}' (ID: {workflow_id}) exists on target. Would perform UPDATE (PUT).")
                 return True
+            if backup_dir:
+                backup_remote_workflow(api_url, headers, workflow_id, backup_dir)
             print(f"Workflow ID {workflow_id} exists on target. Performing UPDATE (PUT).")
             url = f"{base_url}/workflows/{workflow_id}"
             method = 'PUT'
@@ -128,6 +152,7 @@ def main():
     parser.add_argument("--key-env", default="N8N_API_KEY", help="Environment variable name for API key")
     parser.add_argument("--url-env", default="N8N_API_URL", help="Environment variable name for API URL")
     parser.add_argument("--dry-run", action="store_true", help="Simulate deployment actions without modifying remote n8n instance")
+    parser.add_argument("--backup-dir", default=None, help="Directory to store pre-deploy backups of remote workflows")
     args = parser.parse_args()
 
     api_key, api_url = get_api_credentials(args.key_env, args.url_env)
@@ -147,7 +172,7 @@ def main():
     success_count = 0
     for file in workflow_files:
         print(f"\nProcessing {file}...")
-        if deploy_workflow(api_url, headers, file, dry_run=args.dry_run):
+        if deploy_workflow(api_url, headers, file, dry_run=args.dry_run, backup_dir=args.backup_dir):
             success_count += 1
 
     print(f"\nDeployment complete: {success_count}/{len(workflow_files)} workflows processed.")
