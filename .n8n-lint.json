@@ -1,0 +1,28 @@
+{
+  "rules": {
+    "requireErrorWorkflow": true,
+    "checkUniqueNodeNames": true,
+    "detectDisabledNodes": true,
+    "checkWebhookAuth": true,
+    "checkHttpTimeout": true,
+    "checkTypeVersion": true,
+    "scanHardcodedSecrets": true,
+    "validateConnections": true
+  },
+  "secretKeywords": [
+    "key",
+    "secret",
+    "password",
+    "token",
+    "auth",
+    "pwd"
+  ],
+  "excludedSecretValues": [
+    "dummy",
+    "test",
+    "localhost",
+    "127.0.0.1",
+    "none"
+  ],
+  "minHttpTimeoutMs": 1000
+}

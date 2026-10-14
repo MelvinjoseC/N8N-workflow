@@ -5,11 +5,49 @@ import json
 import re
 import argparse
 
-# Suspected hardcoded credential patterns
-CRED_KEYWORDS = ["key", "secret", "password", "token", "auth", "pwd"]
-EXCLUDED_VALUES = ["dummy", "test", "localhost", "127.0.0.1", "none"]
+# Suspected hardcoded credential patterns and default configuration
+DEFAULT_CONFIG = {
+    "rules": {
+        "requireErrorWorkflow": True,
+        "checkUniqueNodeNames": True,
+        "detectDisabledNodes": True,
+        "checkWebhookAuth": True,
+        "checkHttpTimeout": True,
+        "checkTypeVersion": True,
+        "scanHardcodedSecrets": True,
+        "validateConnections": True
+    },
+    "secretKeywords": ["key", "secret", "password", "token", "auth", "pwd"],
+    "excludedSecretValues": ["dummy", "test", "localhost", "127.0.0.1", "none"],
+    "minHttpTimeoutMs": 1000
+}
 
-def is_hardcoded_secret(value):
+CRED_KEYWORDS = DEFAULT_CONFIG["secretKeywords"]
+EXCLUDED_VALUES = DEFAULT_CONFIG["excludedSecretValues"]
+
+def load_config(config_path=None):
+    """
+    Loads linter configuration from a JSON file, merging with default settings.
+    """
+    config = json.loads(json.dumps(DEFAULT_CONFIG))
+    target = config_path or ".n8n-lint.json"
+    if target and os.path.exists(target):
+        try:
+            with open(target, 'r', encoding='utf-8') as f:
+                loaded = json.load(f)
+                if "rules" in loaded and isinstance(loaded["rules"], dict):
+                    config["rules"].update(loaded["rules"])
+                if "secretKeywords" in loaded and isinstance(loaded["secretKeywords"], list):
+                    config["secretKeywords"] = loaded["secretKeywords"]
+                if "excludedSecretValues" in loaded and isinstance(loaded["excludedSecretValues"], list):
+                    config["excludedSecretValues"] = loaded["excludedSecretValues"]
+                if "minHttpTimeoutMs" in loaded:
+                    config["minHttpTimeoutMs"] = loaded["minHttpTimeoutMs"]
+        except Exception as e:
+            print(f"Warning: Failed to load config from {target}: {e}")
+    return config
+
+def is_hardcoded_secret(value, excluded_values=None):
     """
     Checks if a string looks like a hardcoded secret.
     Avoids triggering on n8n expressions (e.g., {{ $env.VAR }}) or known dummy variables.
@@ -27,7 +65,8 @@ def is_hardcoded_secret(value):
         
     # Check if value matches standard dummy placeholders
     val_lower = value.lower()
-    for dummy in EXCLUDED_VALUES:
+    excluded = excluded_values if excluded_values is not None else EXCLUDED_VALUES
+    for dummy in excluded:
         if dummy in val_lower:
             return False
             
@@ -37,11 +76,17 @@ def is_hardcoded_secret(value):
         
     return False
 
-def check_workflow_file(filepath):
+def check_workflow_file(filepath, config=None):
     """
     Runs lint checks on a single n8n workflow JSON file.
     Returns a list of error strings and a list of warning strings.
     """
+    if config is None:
+        config = load_config()
+        
+    rules = config.get("rules", {})
+    cred_keywords = config.get("secretKeywords", CRED_KEYWORDS)
+    excluded_values = config.get("excludedSecretValues", EXCLUDED_VALUES)
     errors = []
     warnings = []
     
@@ -63,11 +108,12 @@ def check_workflow_file(filepath):
     settings = workflow.get("settings", {})
     
     # Rule 1: Check if errorWorkflow is configured
-    if "errorWorkflow" not in settings or not settings["errorWorkflow"]:
-        # Allow Error Trigger workflow itself to not have an error handler
-        is_error_handler = any(n.get("type") == "n8n-nodes-base.errorTrigger" for n in nodes)
-        if not is_error_handler:
-            warnings.append("No 'errorWorkflow' configured in settings. Centralized error handling is recommended.")
+    if rules.get("requireErrorWorkflow", True):
+        if "errorWorkflow" not in settings or not settings["errorWorkflow"]:
+            # Allow Error Trigger workflow itself to not have an error handler
+            is_error_handler = any(n.get("type") == "n8n-nodes-base.errorTrigger" for n in nodes)
+            if not is_error_handler:
+                warnings.append("No 'errorWorkflow' configured in settings. Centralized error handling is recommended.")
 
     node_names = set()
     
@@ -77,30 +123,37 @@ def check_workflow_file(filepath):
         node_type = node.get("type", "unknown")
         
         # Rule 2: Ensure unique node names
-        if name in node_names:
-            errors.append(f"Duplicate node name found: '{name}'")
-        node_names.add(name)
+        if rules.get("checkUniqueNodeNames", True):
+            if name in node_names:
+                errors.append(f"Duplicate node name found: '{name}'")
+            node_names.add(name)
+        else:
+            node_names.add(name)
         
         # Rule 3: Detect disabled nodes (debugging leftovers)
-        if node.get("disabled") is True:
-            warnings.append(f"Node '{name}' is disabled. Verify if it should be removed before production deployment.")
+        if rules.get("detectDisabledNodes", True):
+            if node.get("disabled") is True:
+                warnings.append(f"Node '{name}' is disabled. Verify if it should be removed before production deployment.")
 
         # Rule 4: Webhook and HTTP authentication warnings
-        if node_type == "n8n-nodes-base.webhook":
-            auth = node.get("parameters", {}).get("authentication", "none")
-            if auth == "none":
-                warnings.append(f"Webhook Node '{name}' does not configure authentication. Webhook will be publicly accessible.")
+        if rules.get("checkWebhookAuth", True):
+            if node_type == "n8n-nodes-base.webhook":
+                auth = node.get("parameters", {}).get("authentication", "none")
+                if auth == "none":
+                    warnings.append(f"Webhook Node '{name}' does not configure authentication. Webhook will be publicly accessible.")
 
         # Rule 4b: Check HTTP Request nodes for explicit timeout configuration
-        if node_type == "n8n-nodes-base.httpRequest":
-            options = node.get("parameters", {}).get("options", {})
-            if not isinstance(options, dict) or "timeout" not in options:
-                warnings.append(f"HTTP Request Node '{name}' has no explicit timeout configured. Default or missing timeouts can cause hung executions.")
+        if rules.get("checkHttpTimeout", True):
+            if node_type == "n8n-nodes-base.httpRequest":
+                options = node.get("parameters", {}).get("options", {})
+                if not isinstance(options, dict) or "timeout" not in options:
+                    warnings.append(f"HTTP Request Node '{name}' has no explicit timeout configured. Default or missing timeouts can cause hung executions.")
 
         # Rule 4c: Check for deprecated or invalid node typeVersion (< 1)
-        type_version = node.get("typeVersion")
-        if type_version is not None and isinstance(type_version, (int, float)) and type_version < 1:
-            warnings.append(f"Node '{name}' uses invalid typeVersion ({type_version}). Version must be >= 1.")
+        if rules.get("checkTypeVersion", True):
+            type_version = node.get("typeVersion")
+            if type_version is not None and isinstance(type_version, (int, float)) and type_version < 1:
+                warnings.append(f"Node '{name}' uses invalid typeVersion ({type_version}). Version must be >= 1.")
 
 
         
@@ -112,8 +165,8 @@ def check_workflow_file(filepath):
                 current_path = f"{path}.{k}" if path else k
                 
                 # Check for sensitive key names containing values
-                if isinstance(v, str) and any(keyword in k.lower() for keyword in CRED_KEYWORDS):
-                    if is_hardcoded_secret(v):
+                if isinstance(v, str) and any(keyword in k.lower() for keyword in cred_keywords):
+                    if is_hardcoded_secret(v, excluded_values=excluded_values):
                         errors.append(f"Node '{name}': Suspected hardcoded credential in parameter '{current_path}' (value starts with '{v[:4]}...')")
                         
                 elif isinstance(v, dict):
@@ -123,28 +176,32 @@ def check_workflow_file(filepath):
                         if isinstance(item, dict):
                             inspect_dict(item, f"{current_path}[{idx}]")
 
-        inspect_dict(parameters)
+        if rules.get("scanHardcodedSecrets", True):
+            inspect_dict(parameters)
         
     # Rule 6: Validate connections (no orphaned or undefined nodes referenced)
-    for source_node, conn_types in connections.items():
-        if source_node not in node_names:
-            errors.append(f"Connections reference a source node '{source_node}' that does not exist in the 'nodes' array.")
-            
-        for conn_type, paths in conn_types.items():
-            for path in paths:
-                for target in path:
-                    target_node = target.get("node")
-                    if target_node and target_node not in node_names:
-                        errors.append(f"Connection from '{source_node}' references target node '{target_node}' which does not exist in the 'nodes' array.")
+    if rules.get("validateConnections", True):
+        for source_node, conn_types in connections.items():
+            if source_node not in node_names:
+                errors.append(f"Connections reference a source node '{source_node}' that does not exist in the 'nodes' array.")
+                
+            for conn_type, paths in conn_types.items():
+                for path in paths:
+                    for target in path:
+                        target_node = target.get("node")
+                        if target_node and target_node not in node_names:
+                            errors.append(f"Connection from '{source_node}' references target node '{target_node}' which does not exist in the 'nodes' array.")
 
     return errors, warnings
 
 def main():
     parser = argparse.ArgumentParser(description="Lint n8n workflow export files for production readiness.")
     parser.add_argument("target_path", help="Path to workflow JSON file or directory containing workflow JSON files")
+    parser.add_argument("--config", default=None, help="Path to custom .n8n-lint.json configuration file")
     parser.add_argument("--fail-on-warnings", action="store_true", help="Fail and return exit code 1 even on warnings")
     args = parser.parse_args()
         
+    config = load_config(args.config)
     files_to_check = []
     
     if os.path.isfile(args.target_path):
@@ -165,7 +222,7 @@ def main():
     for filepath in files_to_check:
         filename = os.path.basename(filepath)
         print(f"\nChecking [{filename}]...")
-        errors, warnings = check_workflow_file(filepath)
+        errors, warnings = check_workflow_file(filepath, config=config)
         
         if not errors and not warnings:
             print("  [OK] Passed validation.")
