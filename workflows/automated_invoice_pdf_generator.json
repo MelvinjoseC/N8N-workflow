@@ -56,7 +56,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://demo.gotenberg.dev/api/convert/html",
+        "url": "={{ $env.GOTENBERG_URL || 'http://gotenberg:3000' }}/forms/chromium/convert/html",
         "sendBody": true,
         "specifyBody": "multipart",
         "formData": {
