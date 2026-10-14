@@ -47,21 +47,33 @@ We use [Conventional Commits](https://www.conventionalcommits.org/) format to st
 
 Before committing, ensure all tests pass and workflow exports are valid:
 
-### 1. Run Python Unit Tests
-We maintain unit tests for our CI/CD orchestration and helper scripts. Run:
+### 1. Install Pre-commit Hooks
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+### 2. Run Python Unit Tests
+We maintain comprehensive unit test coverage with pytest across deployment, linting, export, and audit utilities:
 ```bash
 make test
 # OR
-python -m unittest discover -s tests
+pytest
 ```
 
-### 2. Lint Workflow Exports
-Validate workflow JSON exports for hardcoded secrets, duplicate nodes, disabled nodes, and orphaned connections:
+### 3. Lint Workflow Exports
+Validate workflow JSON exports for hardcoded secrets, duplicate nodes, disabled nodes, timeouts, and orphaned connections:
 ```bash
 make lint
 # OR
 python scripts/lint_workflows.py workflows/
 ```
 
-Both tests and linter must return success (exit code 0) for the PR checks to pass.
+### 4. Audit Environment Configuration
+Audit your local environment variables to prevent committing default placeholder credentials:
+```bash
+make audit-env
+```
+
+All test suites and linter validations must return exit code 0 for CI pull request checks to pass.
 

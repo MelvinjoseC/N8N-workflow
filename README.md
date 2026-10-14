@@ -1,6 +1,6 @@
 # Production n8n Workflows & GitOps Infrastructure
 
-This repository is a production-ready, GitOps-driven boilerplate for managing self-hosted [n8n](https://n8n.io) integrations and workflows. It demonstrates industry best practices for continuous integration/deployment (CI/CD), security isolation, docker-based scaling (queue mode), and custom workflow validation.
+This repository is a production-grade, GitOps-driven boilerplate for managing self-hosted [n8n](https://n8n.io) integrations and workflows. It demonstrates industry best practices for continuous integration/deployment (CI/CD), security isolation, docker-based scaling (queue mode), automated workflow validation, and disaster recovery.
 
 ---
 
@@ -11,11 +11,12 @@ The following diagram illustrates the deployment topology configured in `docker-
 ```mermaid
 graph TD
     User([External Request / Webhook]) -->|HTTP Port 5678| N8N[n8n App Server]
-    N8N -->|Read/Write Data| DB[(PostgreSQL Database)]
-    N8N -->|Bull Queue Engine| Redis[(Redis Broker)]
+    N8N -->|Read/Write Data| DB[(PostgreSQL 15 Database)]
+    N8N -->|Bull Queue Engine| Redis[(Redis 7 Broker)]
+    N8N -->|HTML-to-PDF REST API| Gotenberg[Gotenberg Service]
     
     subgraph Operations Container
-        Backup[db-backup daemon] -.->|pg_dump hourly| DB
+        Backup[db-backup daemon] -.->|pg_dump hourly & gzip| DB
     end
 ```
 
@@ -25,20 +26,45 @@ graph TD
 
 ```text
 ├── .github/
-│   └── workflows/
-│       ├── lint-workflows.yml     # CI: Validates JSON structure, naming conventions, & checks secrets
-│       └── deploy-workflows.yml   # CD: Deploys workflows to n8n instance via n8n REST API
+│   ├── workflows/
+│   │   ├── lint-workflows.yml          # CI: Validates JSON structure, secrets & node versions
+│   │   ├── run-tests.yml               # CI: Matrix unit testing across Python 3.10, 3.11, 3.12
+│   │   ├── deploy-workflows.yml        # CD: Idempotent deployment to n8n with backup & git tags
+│   │   ├── docker-compose-validate.yml # CI: Validates Docker Compose syntax and env schemas
+│   │   └── security-audit.yml          # CI: Bandit AST and pip vulnerability scanner
+│   └── dependabot.yml                  # Automated weekly dependency updates
+├── docs/
+│   └── adr/
+│       ├── 0001-gitops-workflow-sync-architecture.md # Architecture decision: GitOps workflow
+│       └── 0002-scaling-n8n-with-redis-queue-mode.md # Architecture decision: Bull queue scaling
 ├── scripts/
-│   └── lint_workflows.py          # Custom Python validation script for workflow linting
+│   ├── lint_workflows.py               # Custom workflow linter with color, JUnit/JSON reporting
+│   ├── deploy_workflows.py             # Syncs local workflows to n8n API with dry-run and retries
+│   ├── export_workflows.py             # Bidirectional sync: exports remote workflows to repo
+│   ├── validate_env.py                 # Audits .env for insecure defaults and missing variables
+│   └── restore_db.sh                   # Disaster recovery script for gzipped postgres dumps
+├── tests/
+│   ├── test_lint_workflows.py          # Unit test suite for workflow linter
+│   ├── test_deploy_workflows.py        # Unit test suite for deployment script
+│   ├── test_export_workflows.py        # Unit test suite for workflow exporter
+│   └── test_validate_env.py            # Unit test suite for environment validator
 ├── workflows/
-│   ├── global_error_handler.json  # Reusable sub-workflow for logging and Slack alerts
-│   ├── lead_generation_crm_sync.json # Webhook lead processing & HubSpot CRM integration
-│   ├── system_health_check_alerting.json # Automated Cron health checks on APIs and Databases
-│   └── automated_invoice_pdf_generator.json # Invoice generation, AWS S3 upload, & email SMTP routing
-├── .env.example                   # Environment configuration template
-├── docker-compose.yml             # Local production-ready multi-container n8n environment
-├── CONTRIBUTING.md                # Developer setup and contribution guidelines
-└── LICENSE                        # MIT License
+│   ├── global_error_handler.json       # Centralized incident handler for Slack alerting
+│   ├── lead_generation_crm_sync.json   # Webhook lead qualification & HubSpot CRM routing
+│   ├── system_health_check_alerting.json # Automated 15-min database & API status probes
+│   ├── automated_invoice_pdf_generator.json # Gotenberg PDF generator & AWS S3/SMTP pipeline
+│   ├── database_retention_cleanup.json # Daily automated execution log retention cleanup
+│   └── uptime_latency_monitor.json     # Continuous 5-min uptime probe and latency alerting
+├── .env.example                        # Hardened environment variable configuration template
+├── .n8n-lint.json                      # Configurable rules engine for workflow linter
+├── .pre-commit-config.yaml             # Pre-commit hook definitions for code quality
+├── pyproject.toml                      # Standard Python project packaging and tool configuration
+├── pytest.ini                          # Pytest test discovery and execution configuration
+├── docker-compose.yml                  # Production multi-container stack (n8n, db, redis, gotenberg)
+├── Makefile                            # Standardized developer CLI interface
+├── CONTRIBUTING.md                     # Engineering contribution and workflow guidelines
+├── SECURITY.md                         # Security policy and disclosure process
+└── LICENSE                             # MIT License
 ```
 
 ---
@@ -47,6 +73,7 @@ graph TD
 
 ### Prerequisites
 - Docker & Docker Compose (v2.x or higher)
+- Python 3.10+
 - Git
 
 ### Installation Steps
@@ -58,22 +85,24 @@ graph TD
    ```
 
 2. **Configure Environment Variables:**
-   Copy the template and fill in your keys:
    ```bash
    cp .env.example .env
    ```
-   *Note: Make sure to change values for `N8N_ENCRYPTION_KEY`, database credentials, and API tokens.*
+   *Audit your `.env` configuration against security defaults:*
+   ```bash
+   make audit-env
+   ```
 
 3. **Start the Stack:**
-   Initialize all services in detached mode:
    ```bash
    docker compose up -d
    ```
-   This will spin up:
-   * **n8n app server** listening on `http://localhost:5678`
-   * **PostgreSQL 15 database** for workflow storage and execution logs
-   * **Redis 7 database** for scale/queue management
-   * **Database backup daemon** that automatically takes snapshots and purges backups older than 7 days
+   Services initialized:
+   * **n8n app server** listening on `http://localhost:5678` with active healthcheck probe
+   * **PostgreSQL 15 database** with automated volume persistence
+   * **Redis 7 broker** for Bull Queue asynchronous task processing
+   * **Gotenberg service** on `http://localhost:3000` for containerized HTML-to-PDF rendering
+   * **Database backup daemon** rotating compressed snapshots every 24 hours with 7-day retention
 
 4. **Verify Container Health:**
    ```bash
@@ -82,65 +111,49 @@ graph TD
 
 ---
 
-## ⚙️ Core Workflows Explained
+## ⚙️ Workflows Overview
 
-All workflows in the `workflows/` directory are configured with centralized error routing pointing to the **Global Error Handler** workflow.
+All workflows designate the **Global Error Handler** (`global_error_handler.json`) for centralized failure notification.
 
-### 1. Global Error Handler (`global_error_handler.json`)
-* **Trigger:** Error Trigger node.
-* **Functionality:** Captures crash/fail execution metadata, formats a clean Slack block message with URLs, and pushes the event to Slack while logging to output.
-* **Significance:** Standardizes incident alerts across all integration pipelines.
-
-### 2. Lead Generation & CRM Sync (`lead_generation_crm_sync.json`)
-* **Trigger:** Webhook endpoint.
-* **Functionality:** Validates and normalizes user input via JS, queries HubSpot by email, forks logic to create or update contact details, and registers a sales notification in Slack.
-
-### 3. System Health Check & Alerting (`system_health_check_alerting.json`)
-* **Trigger:** Cron Node (every 15 minutes).
-* **Functionality:** Validates external HTTP API connectivity and tests the internal PostgreSQL database latency via `SELECT 1;`. Passes metadata to the evaluator before pushing status reports.
-
-### 4. Automated Invoice PDF Generator (`automated_invoice_pdf_generator.json`)
-* **Trigger:** Order confirmation Webhook.
-* **Functionality:** Extracts billing records, constructs a responsive HTML invoice template dynamically, sends it to Gotenberg API for PDF generation, uploads the document to Amazon S3, and emails the PDF as an attachment using SMTP.
+| Workflow | Trigger | Description | Integrations |
+| :--- | :--- | :--- | :--- |
+| **Global Error Handler** | Error Trigger | Captures execution crashes, formats rich Slack blocks | Slack Webhook |
+| **Lead Generation & CRM Sync** | Header-Auth Webhook | Validates lead payload, creates/updates contacts | HubSpot CRM, Slack |
+| **System Health Check** | Cron (15m) | Probes backend endpoints and executes `SELECT 1;` | PostgreSQL, Slack |
+| **Automated Invoice PDF** | Header-Auth Webhook | Renders HTML invoice, converts to PDF via Gotenberg | Gotenberg, AWS S3, SMTP |
+| **Database Retention Cleanup** | Cron (Daily 02:00) | Prunes execution records older than 30 days | PostgreSQL, Slack |
+| **Uptime & Latency Monitor** | Cron (5m) | Measures endpoint latency and alerts on degradation | HTTP API, Slack |
 
 ---
 
-## 🛠️ Tooling & Verification
+## 🛠️ Developer Tooling & CLI Commands
 
-We support robust local development validation and automated test suites.
+### Makefile Shortcuts
+- **`make lint`**: Runs workflow linter with ANSI color output.
+- **`make test`**: Executes complete Python test suite via `pytest`.
+- **`make audit-env`**: Verifies `.env` against production rules.
+- **`make export`**: Exports workflows from live n8n instance into `workflows/`.
+- **`make up` / `make down`**: Controls dockerized stack lifecycle.
+- **`make backup`**: Manually creates a compressed PostgreSQL backup.
+- **`make clean`**: Removes pytest and Python temporary cache files.
 
-### Local CLI Commands (Makefile)
-Standardize operations via the included `Makefile`:
-- **`make lint`**: Runs custom Python linter over local workflow exports.
-- **`make test`**: Runs unit test suite for Python linter and deployment scripts.
-- **`make up` / `make down`**: Initialize/shutdown local dockerised stack.
-- **`make backup`**: Run Postgres database backup manually.
+### Workflow Linter (`scripts/lint_workflows.py`)
+Configured via `.n8n-lint.json`:
+- **Secret Scanning:** Flags suspected API tokens and passwords while allowing `{{ $env.VAR }}` expressions.
+- **Error Routing:** Enforces designation of `errorWorkflow`.
+- **Resilience:** Flags HTTP nodes missing explicit `timeout` settings.
+- **Deprecations:** Checks node `typeVersion >= 1`.
+- **Connection Integrity:** Verifies all graph links connect existing nodes.
+- **Reporting:** Supports `--format text|json|junit` and `--output FILE` for CI dashboards.
 
-### Workflow Linting (`scripts/lint_workflows.py`)
-Linting rules include:
-1. **Secret Scanning:** Scan for hardcoded plaintext credentials (flags base64/hex, allows expressions like `{{ $env.VAR }}`).
-2. **Error Handler Check:** Ensure workflows designate an `errorWorkflow` to intercept runtime issues.
-3. **Naming Collisions:** Enforce unique, distinct node names.
-4. **Disabled Nodes Check:** Warn on nodes left with `"disabled": true` configuration.
-5. **Connection Validation:** Verify connections do not reference non-existent source/target node names.
-6. **Webhook Auth Warning:** Warn if webhook triggers are fully public without authorization options.
+### Deployment Script (`scripts/deploy_workflows.py`)
+- **`--dry-run`**: Simulates deployment without modifying remote state.
+- **`--backup-dir <dir>`**: Automatically downloads pre-deploy remote backups before overwriting.
+- **Git Metadata Stamping:** Injects git commit hash and deploy timestamp into workflow tags/metadata.
+- **Resilient Networking:** Retries on transient 502/503/504 errors with exponential backoff.
 
-### Unit Test Suites (`tests/`)
-We maintain comprehensive unit test coverage for our scripts using `unittest` and `unittest.mock`:
+### Database Recovery (`scripts/restore_db.sh`)
 ```bash
-# Run unit tests locally
-python -m unittest discover -s tests
+./scripts/restore_db.sh /backups/n8n_db_backup_20261014.sql.gz
 ```
-
----
-
-## 🤖 CI/CD GitOps Pipeline Flow
-
-This repository leverages GitHub Actions to establish robust linting, validation, and deployment pipelines:
-
-### 1. Test & Lint Suite (`run-tests.yml` & `lint-workflows.yml`)
-Runs on every Pull Request and Branch Push to execute the python unit tests and run the workflow linter. If tests fail or workflows fail validation, the pipeline is blocked.
-
-### 2. Production CD Sync (`deploy-workflows.yml` -> `scripts/deploy_workflows.py`)
-Triggered on merges into `main` or `master` branches targeting workflow file changes. Executes a synchronization script that checks n8n API endpoints, decides whether to execute a `PUT` (for updates) or `POST` (for registering new workflows), and automatically synchronizes git changes to n8n.
-
+Verifies gzip archive integrity, closes active database connections, restores schemas, and validates table counts.
