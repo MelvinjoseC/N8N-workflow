@@ -90,6 +90,13 @@ def check_workflow_file(filepath):
             auth = node.get("parameters", {}).get("authentication", "none")
             if auth == "none":
                 warnings.append(f"Webhook Node '{name}' does not configure authentication. Webhook will be publicly accessible.")
+
+        # Rule 4b: Check HTTP Request nodes for explicit timeout configuration
+        if node_type == "n8n-nodes-base.httpRequest":
+            options = node.get("parameters", {}).get("options", {})
+            if not isinstance(options, dict) or "timeout" not in options:
+                warnings.append(f"HTTP Request Node '{name}' has no explicit timeout configured. Default or missing timeouts can cause hung executions.")
+
         
         # Rule 5: Inspect parameters for hardcoded secrets
         parameters = node.get("parameters", {})

@@ -59,7 +59,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"text\": \"🟢 Uptime Check Passed: {{ $json.target }} responded with HTTP {{ $json.status_code }} at {{ $json.checked_at }}.\"}",
-        "options": {}
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "44444444-5555-6666-7777-888888888888",
       "name": "Log Uptime Metric",

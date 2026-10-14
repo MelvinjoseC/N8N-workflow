@@ -49,7 +49,10 @@ class TestLintWorkflows(unittest.TestCase):
                     "type": "n8n-nodes-base.httpRequest",
                     "parameters": {
                         "url": "https://api.github.com",
-                        "authentication": "none"
+                        "authentication": "none",
+                        "options": {
+                            "timeout": 5000
+                        }
                     }
                 }
             ],

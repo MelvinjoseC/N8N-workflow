@@ -52,7 +52,9 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "timeout": 15000
+        }
       },
       "id": "3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f",
       "name": "Find HubSpot Contact",
@@ -113,7 +115,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"properties\": {\"email\": \"{{ $('Validate & Format Data').item.json.lead.email }}\", \"firstname\": \"{{ $('Validate & Format Data').item.json.lead.name.split(' ')[0] }}\", \"lastname\": \"{{ $('Validate & Format Data').item.json.lead.name.split(' ').slice(1).join(' ') }}\", \"company\": \"{{ $('Validate & Format Data').item.json.lead.company }}\", \"phone\": \"{{ $('Validate & Format Data').item.json.lead.phone }}\"}}",
-        "options": {}
+        "options": {
+          "timeout": 15000
+        }
       },
       "id": "5e6f7a8b-9c0d-1e2f-3a4b-5c6d7e8f9a0b",
       "name": "Create HubSpot Contact",
@@ -144,7 +148,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"properties\": {\"phone\": \"{{ $('Validate & Format Data').item.json.lead.phone }}\", \"company\": \"{{ $('Validate & Format Data').item.json.lead.company }}\"}}",
-        "options": {}
+        "options": {
+          "timeout": 15000
+        }
       },
       "id": "6f7a8b9c-0d1e-2f3a-4b5c-6d7e8f9a0b1c",
       "name": "Update HubSpot Contact",
@@ -162,7 +168,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"text\": \"🎉 New Lead Processed!\\n*Name:* {{ $('Validate & Format Data').item.json.lead.name }}\\n*Email:* {{ $('Validate & Format Data').item.json.lead.email }}\\n*Company:* {{ $('Validate & Format Data').item.json.lead.company }}\\n*Status:* {{ $node['Router: Existing Contact?'].active ? 'New Contact Created' : 'Existing Contact Updated' }}\"}",
-        "options": {}
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
       "name": "Slack Lead Alert",

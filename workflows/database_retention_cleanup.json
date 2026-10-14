@@ -63,7 +63,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"text\": \"🧹 Execution Log Pruning Completed\\n*Pruned Records:* {{ $json.pruned_count }}\\n*Retention Window:* {{ $json.retention_days }} days\\n*Executed At:* {{ $json.executed_at }}\"}",
-        "options": {}
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "f4d5e6f7-a8b9-0c1d-2e3f-4a5b6c7d8e9f",
       "name": "Slack Retention Summary",

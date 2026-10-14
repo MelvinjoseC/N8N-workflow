@@ -30,7 +30,9 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "timeout": 15000
+        }
       },
       "id": "f2g3h4i5-j6k7-l8m9-n0o1-p2q3r4s5t6u7",
       "name": "Fetch Order Details",
@@ -71,6 +73,7 @@
           ]
         },
         "options": {
+          "timeout": 30000,
           "response": {
             "response": {
               "responseFormat": "file"
