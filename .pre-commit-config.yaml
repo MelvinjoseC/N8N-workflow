@@ -1,0 +1,27 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      - id: lint-workflows
+        name: Lint n8n Workflows
+        entry: python scripts/lint_workflows.py
+        language: system
+        files: ^workflows/.*\.json$
+        pass_filenames: true
+
+      - id: run-tests
+        name: Run Unit Tests
+        entry: python -m unittest discover -s tests
+        language: system
+        files: ^(scripts|tests)/.*\.py$
+        pass_filenames: false
