@@ -77,7 +77,19 @@ def backup_remote_workflow(api_url, headers, workflow_id, backup_dir):
         print(f"Warning: Failed to create pre-deploy backup for {workflow_id}: {e}")
         return None
 
-def deploy_workflow(api_url, headers, filepath, dry_run=False, backup_dir=None):
+import subprocess
+
+def get_git_commit_sha():
+    """
+    Returns short git commit SHA if available, otherwise None.
+    """
+    try:
+        res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True)
+        return res.stdout.strip()
+    except Exception:
+        return None
+
+def deploy_workflow(api_url, headers, filepath, dry_run=False, backup_dir=None, git_commit=None):
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             workflow_data = json.load(f)
@@ -90,13 +102,22 @@ def deploy_workflow(api_url, headers, filepath, dry_run=False, backup_dir=None):
         print(f"Error: Workflow in {filepath} is missing a name.")
         return False
 
+    meta = workflow_data.get('meta', {}).copy()
+    commit_sha = git_commit or get_git_commit_sha()
+    if commit_sha:
+        meta['gitCommit'] = commit_sha
+        meta['deployedAt'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
     payload = {
         'name': name,
         'nodes': workflow_data.get('nodes', []),
         'connections': workflow_data.get('connections', {}),
         'settings': workflow_data.get('settings', {}),
-        'active': workflow_data.get('active', False)
+        'active': workflow_data.get('active', False),
+        'meta': meta
     }
+    if 'tags' in workflow_data:
+        payload['tags'] = workflow_data['tags']
 
     workflow_id = workflow_data.get('id')
     base_url = api_url.rstrip('/')
