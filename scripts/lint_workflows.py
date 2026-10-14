@@ -194,11 +194,18 @@ def check_workflow_file(filepath, config=None):
 
     return errors, warnings
 
+def colorize(text, color_code):
+    if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
+        return text
+    return f"\033[{color_code}m{text}\033[0m"
+
 def main():
     parser = argparse.ArgumentParser(description="Lint n8n workflow export files for production readiness.")
     parser.add_argument("target_path", help="Path to workflow JSON file or directory containing workflow JSON files")
     parser.add_argument("--config", default=None, help="Path to custom .n8n-lint.json configuration file")
     parser.add_argument("--fail-on-warnings", action="store_true", help="Fail and return exit code 1 even on warnings")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress non-error output")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed inspection traces")
     args = parser.parse_args()
         
     config = load_config(args.config)
@@ -212,37 +219,44 @@ def main():
                 if file.endswith(".json"):
                     files_to_check.append(os.path.join(root, file))
     else:
-        print(f"Error: Target path '{args.target_path}' does not exist.")
+        print(colorize(f"Error: Target path '{args.target_path}' does not exist.", "31"))
         sys.exit(1)
         
     total_errors = 0
     total_warnings = 0
-    print(f"Linting {len(files_to_check)} workflow file(s)...")
+    if not args.quiet:
+        print(colorize(f"Linting {len(files_to_check)} workflow file(s)...", "36"))
     
     for filepath in files_to_check:
         filename = os.path.basename(filepath)
-        print(f"\nChecking [{filename}]...")
         errors, warnings = check_workflow_file(filepath, config=config)
         
+        if not args.quiet:
+            print(f"\nChecking [{colorize(filename, '1')}]...")
+        
         if not errors and not warnings:
-            print("  [OK] Passed validation.")
+            if not args.quiet:
+                print(f"  [{colorize('OK', '32')}] Passed validation.")
         else:
             for warning in warnings:
-                print(f"  [WARN] Warning: {warning}")
+                print(f"  [{colorize('WARN', '33')}] Warning: {warning}")
                 total_warnings += 1
             for error in errors:
-                print(f"  [ERROR] Error: {error}")
+                print(f"  [{colorize('ERROR', '31')}] Error: {error}")
                 total_errors += 1
                 
-    print("\n" + "="*40)
-    print(f"Lint Summary: {total_errors} error(s), {total_warnings} warning(s) found.")
-    print("="*40)
+    if not args.quiet or total_errors > 0 or total_warnings > 0:
+        print("\n" + "="*40)
+        status_color = "32" if total_errors == 0 else "31"
+        print(f"Lint Summary: {colorize(str(total_errors) + ' error(s)', status_color)}, {colorize(str(total_warnings) + ' warning(s)', '33' if total_warnings else '32')} found.")
+        print("="*40)
     
     if total_errors > 0 or (args.fail_on_warnings and total_warnings > 0):
-        print("\nLinting FAILED. Please resolve issues.")
+        print("\n" + colorize("Linting FAILED. Please resolve issues.", "31"))
         sys.exit(1)
     else:
-        print("\nLinting PASSED.")
+        if not args.quiet:
+            print("\n" + colorize("Linting PASSED.", "32"))
         sys.exit(0)
 
 if __name__ == "__main__":
