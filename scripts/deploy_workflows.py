@@ -7,16 +7,44 @@ import urllib.request
 import urllib.error
 import argparse
 
+import time
+
+DEFAULT_TIMEOUT = 30
+RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+
 def get_api_credentials(api_key_env, api_url_env):
     api_key = os.environ.get(api_key_env)
     api_url = os.environ.get(api_url_env)
     return api_key, api_url
 
-def check_workflow_exists(api_url, headers, workflow_id):
+def make_request(req, timeout=DEFAULT_TIMEOUT, max_retries=3, backoff_factor=1.0):
+    """
+    Executes an urllib request with timeout and exponential backoff retry logic.
+    """
+    retries = 0
+    while True:
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code in RETRY_STATUS_CODES and retries < max_retries:
+                retries += 1
+                sleep_time = backoff_factor * (2 ** (retries - 1))
+                time.sleep(sleep_time)
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError) as e:
+            if retries < max_retries:
+                retries += 1
+                sleep_time = backoff_factor * (2 ** (retries - 1))
+                time.sleep(sleep_time)
+                continue
+            raise
+
+def check_workflow_exists(api_url, headers, workflow_id, timeout=DEFAULT_TIMEOUT):
     check_url = f"{api_url.rstrip('/')}/workflows/{workflow_id}"
     req = urllib.request.Request(check_url, headers=headers, method='GET')
     try:
-        with urllib.request.urlopen(req) as resp:
+        with make_request(req, timeout=timeout, max_retries=2, backoff_factor=0.2) as resp:
             if resp.status == 200:
                 return True
     except urllib.error.HTTPError as e:
@@ -71,7 +99,7 @@ def deploy_workflow(api_url, headers, filepath):
     )
 
     try:
-        with urllib.request.urlopen(req) as resp:
+        with make_request(req, timeout=DEFAULT_TIMEOUT) as resp:
             result = json.loads(resp.read().decode('utf-8'))
             print(f"Successfully deployed: {result.get('name')} (ID: {result.get('id')})")
             return True
