@@ -128,5 +128,63 @@ class TestDeployWorkflows(unittest.TestCase):
         self.assertEqual(req_arg.method, "POST")
         self.assertEqual(req_arg.full_url, "https://n8n.test.com/workflows")
 
+    @patch('deploy_workflows.check_workflow_exists')
+    @patch('urllib.request.urlopen')
+    def test_deploy_workflow_dry_run_existing(self, mock_urlopen, mock_check_exists):
+        workflow_json = '{"id": "wf-123", "name": "Existing Dry Run", "nodes": []}'
+        mock_check_exists.return_value = True
+
+        with patch('builtins.open', mock_open(read_data=workflow_json)):
+            success = deploy_workflows.deploy_workflow(self.api_url, self.headers, "path.json", dry_run=True)
+
+        self.assertTrue(success)
+        mock_urlopen.assert_not_called()
+
+    @patch('deploy_workflows.check_workflow_exists')
+    @patch('urllib.request.urlopen')
+    def test_deploy_workflow_dry_run_new(self, mock_urlopen, mock_check_exists):
+        workflow_json = '{"name": "New Dry Run", "nodes": []}'
+
+        with patch('builtins.open', mock_open(read_data=workflow_json)):
+            success = deploy_workflows.deploy_workflow(self.api_url, self.headers, "path.json", dry_run=True)
+
+        self.assertTrue(success)
+        mock_urlopen.assert_not_called()
+
+    @patch('urllib.request.urlopen')
+    def test_backup_remote_workflow(self, mock_urlopen):
+        import tempfile
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b'{"id": "wf-backup", "name": "Backup WF"}'
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            backup_file = deploy_workflows.backup_remote_workflow(self.api_url, self.headers, "wf-backup", tmpdir)
+            self.assertIsNotNone(backup_file)
+            self.assertTrue(os.path.exists(backup_file))
+            with open(backup_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self.assertIn("Backup WF", content)
+
+    @patch('time.sleep')
+    @patch('urllib.request.urlopen')
+    def test_make_request_retry_on_503(self, mock_urlopen, mock_sleep):
+        err_503 = urllib.error.HTTPError("url", 503, "Service Unavailable", {}, io.BytesIO(b""))
+        ok_resp = MagicMock()
+        ok_resp.status = 200
+        mock_urlopen.side_effect = [err_503, ok_resp]
+
+        req = urllib.request.Request("https://test.com")
+        resp = deploy_workflows.make_request(req, max_retries=2, backoff_factor=0.01)
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    def test_get_git_commit_sha(self):
+        sha = deploy_workflows.get_git_commit_sha()
+        # In this git repo, sha should be a non-empty string of hex characters
+        self.assertIsNotNone(sha)
+        self.assertTrue(len(sha) >= 4)
+
 if __name__ == "__main__":
     unittest.main()
