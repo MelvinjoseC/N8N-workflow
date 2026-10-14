@@ -60,6 +60,28 @@ services:
     networks:
       - n8n-network
 
+  gotenberg:
+    image: gotenberg/gotenberg:7
+    container_name: n8n-gotenberg
+    restart: always
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+        reservations:
+          memory: 256M
+    networks:
+      - n8n-network
+
+
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n-app
