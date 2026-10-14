@@ -97,6 +97,12 @@ def check_workflow_file(filepath):
             if not isinstance(options, dict) or "timeout" not in options:
                 warnings.append(f"HTTP Request Node '{name}' has no explicit timeout configured. Default or missing timeouts can cause hung executions.")
 
+        # Rule 4c: Check for deprecated or invalid node typeVersion (< 1)
+        type_version = node.get("typeVersion")
+        if type_version is not None and isinstance(type_version, (int, float)) and type_version < 1:
+            warnings.append(f"Node '{name}' uses invalid typeVersion ({type_version}). Version must be >= 1.")
+
+
         
         # Rule 5: Inspect parameters for hardcoded secrets
         parameters = node.get("parameters", {})
