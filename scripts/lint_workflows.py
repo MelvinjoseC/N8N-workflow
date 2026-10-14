@@ -199,6 +199,44 @@ def colorize(text, color_code):
         return text
     return f"\033[{color_code}m{text}\033[0m"
 
+def generate_report(results, report_format="text", output_file=None):
+    """
+    Generates report string in text, json, or junit XML format, and optionally saves to file.
+    """
+    total_errors = sum(len(r["errors"]) for r in results)
+    total_warnings = sum(len(r["warnings"]) for r in results)
+    
+    if report_format == "json":
+        data = {
+            "summary": {
+                "total_files": len(results),
+                "total_errors": total_errors,
+                "total_warnings": total_warnings,
+                "passed": total_errors == 0
+            },
+            "files": results
+        }
+        content = json.dumps(data, indent=2)
+    elif report_format == "junit":
+        lines = ['<?xml version="1.0" encoding="UTF-8"?>']
+        lines.append(f'<testsuite name="n8n-workflow-linter" tests="{len(results)}" failures="{total_errors}" errors="0">')
+        for r in results:
+            lines.append(f'  <testcase classname="workflows" name="{r["file"]}">')
+            if r["errors"]:
+                msg = "; ".join(r["errors"])
+                lines.append(f'    <failure message="Validation failed">{msg}</failure>')
+            lines.append('  </testcase>')
+        lines.append('</testsuite>')
+        content = "\n".join(lines)
+    else:
+        content = None
+
+    if output_file and content:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+            
+    return content
+
 def main():
     parser = argparse.ArgumentParser(description="Lint n8n workflow export files for production readiness.")
     parser.add_argument("target_path", help="Path to workflow JSON file or directory containing workflow JSON files")
@@ -206,6 +244,8 @@ def main():
     parser.add_argument("--fail-on-warnings", action="store_true", help="Fail and return exit code 1 even on warnings")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress non-error output")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed inspection traces")
+    parser.add_argument("--format", choices=["text", "json", "junit"], default="text", help="Output report format (text, json, junit)")
+    parser.add_argument("--output", "-o", default=None, help="Save report output to specified file path")
     args = parser.parse_args()
         
     config = load_config(args.config)
@@ -222,40 +262,56 @@ def main():
         print(colorize(f"Error: Target path '{args.target_path}' does not exist.", "31"))
         sys.exit(1)
         
+    results = []
     total_errors = 0
     total_warnings = 0
-    if not args.quiet:
+    
+    if not args.quiet and args.format == "text":
         print(colorize(f"Linting {len(files_to_check)} workflow file(s)...", "36"))
     
     for filepath in files_to_check:
         filename = os.path.basename(filepath)
         errors, warnings = check_workflow_file(filepath, config=config)
+        results.append({
+            "file": filename,
+            "filepath": filepath,
+            "errors": errors,
+            "warnings": warnings,
+            "passed": len(errors) == 0
+        })
         
-        if not args.quiet:
+        if not args.quiet and args.format == "text":
             print(f"\nChecking [{colorize(filename, '1')}]...")
         
         if not errors and not warnings:
-            if not args.quiet:
+            if not args.quiet and args.format == "text":
                 print(f"  [{colorize('OK', '32')}] Passed validation.")
         else:
             for warning in warnings:
-                print(f"  [{colorize('WARN', '33')}] Warning: {warning}")
+                if args.format == "text":
+                    print(f"  [{colorize('WARN', '33')}] Warning: {warning}")
                 total_warnings += 1
             for error in errors:
-                print(f"  [{colorize('ERROR', '31')}] Error: {error}")
+                if args.format == "text":
+                    print(f"  [{colorize('ERROR', '31')}] Error: {error}")
                 total_errors += 1
+
+    report_str = generate_report(results, report_format=args.format, output_file=args.output)
+    if args.format in ["json", "junit"] and not args.output:
+        print(report_str)
                 
-    if not args.quiet or total_errors > 0 or total_warnings > 0:
+    if args.format == "text" and (not args.quiet or total_errors > 0 or total_warnings > 0):
         print("\n" + "="*40)
         status_color = "32" if total_errors == 0 else "31"
         print(f"Lint Summary: {colorize(str(total_errors) + ' error(s)', status_color)}, {colorize(str(total_warnings) + ' warning(s)', '33' if total_warnings else '32')} found.")
         print("="*40)
     
     if total_errors > 0 or (args.fail_on_warnings and total_warnings > 0):
-        print("\n" + colorize("Linting FAILED. Please resolve issues.", "31"))
+        if args.format == "text":
+            print("\n" + colorize("Linting FAILED. Please resolve issues.", "31"))
         sys.exit(1)
     else:
-        if not args.quiet:
+        if not args.quiet and args.format == "text":
             print("\n" + colorize("Linting PASSED.", "32"))
         sys.exit(0)
 
