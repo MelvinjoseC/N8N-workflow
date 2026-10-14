@@ -227,5 +227,93 @@ class TestLintWorkflows(unittest.TestCase):
         self.assertTrue(any("references target node 'NonExistent Node'" in e for e in errors))
         self.assertTrue(any("source node 'Node B' that does not exist" in e for e in errors))
 
+    def test_http_timeout_warning(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Slow HTTP",
+                    "type": "n8n-nodes-base.httpRequest",
+                    "parameters": {
+                        "options": {}
+                    }
+                }
+            ],
+            "settings": {"errorWorkflow": "some-id"}
+        }
+        filepath = self.create_temp_workflow("http_timeout", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertEqual(len(errors), 0)
+        self.assertTrue(any("has no explicit timeout configured" in w for w in warnings))
+
+    def test_invalid_type_version_warning(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Legacy Node",
+                    "type": "n8n-nodes-base.set",
+                    "typeVersion": 0
+                }
+            ],
+            "settings": {"errorWorkflow": "some-id"}
+        }
+        filepath = self.create_temp_workflow("invalid_type_version", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertEqual(len(errors), 0)
+        self.assertTrue(any("invalid typeVersion (0)" in w for w in warnings))
+
+    def test_load_config_custom_file(self):
+        config_data = {
+            "rules": {
+                "requireErrorWorkflow": False
+            },
+            "secretKeywords": ["custom_secret"]
+        }
+        config_path = os.path.join(self.test_dir.name, "custom_lint.json")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f)
+
+        cfg = lint_workflows.load_config(config_path)
+        self.assertFalse(cfg["rules"]["requireErrorWorkflow"])
+        self.assertEqual(cfg["secretKeywords"], ["custom_secret"])
+
+    def test_rule_disabled_via_config(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Start",
+                    "type": "n8n-nodes-base.start"
+                }
+            ],
+            "settings": {}
+        }
+        filepath = self.create_temp_workflow("no_error_wf", data)
+        custom_config = {
+            "rules": {
+                "requireErrorWorkflow": False
+            }
+        }
+        errors, warnings = lint_workflows.check_workflow_file(filepath, config=custom_config)
+        self.assertEqual(len(errors), 0)
+        self.assertEqual(len(warnings), 0)
+
+    def test_generate_report_json_and_junit(self):
+        results = [
+            {
+                "file": "test_wf.json",
+                "filepath": "workflows/test_wf.json",
+                "errors": ["Sample Error"],
+                "warnings": ["Sample Warning"],
+                "passed": False
+            }
+        ]
+        json_report = lint_workflows.generate_report(results, report_format="json")
+        parsed = json.loads(json_report)
+        self.assertEqual(parsed["summary"]["total_errors"], 1)
+        self.assertFalse(parsed["summary"]["passed"])
+
+        junit_report = lint_workflows.generate_report(results, report_format="junit")
+        self.assertIn("<testsuite", junit_report)
+        self.assertIn("Sample Error", junit_report)
+
 if __name__ == "__main__":
     unittest.main()
