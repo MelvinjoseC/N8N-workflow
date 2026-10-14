@@ -1,0 +1,116 @@
+{
+  "name": "API Uptime & Latency Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "value": [
+            {
+              "mode": "everyMinute",
+              "interval": 5
+            }
+          ]
+        }
+      },
+      "id": "11111111-2222-3333-4444-555555555555",
+      "name": "Cron (5m) Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.HEALTH_CHECK_ENDPOINT || 'https://api.github.com' }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "22222222-3333-4444-5555-666666666666",
+      "name": "Probe Health Endpoint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = items[0] || {};\nconst hasError = !!response.error;\nconst statusCode = response.json ? (response.json.statusCode || 200) : 500;\nconst timestamp = new Date().toISOString();\n\nif (hasError || statusCode >= 400) {\n  throw new Error(`Probe failed with status: ${statusCode}. Error: ${response.error?.message || 'Unknown network error'}`);\n}\n\nreturn {\n  json: {\n    status: \"operational\",\n    target: $env.HEALTH_CHECK_ENDPOINT || 'https://api.github.com',\n    status_code: statusCode,\n    checked_at: timestamp\n  }\n};"
+      },
+      "id": "33333333-4444-5555-6666-777777777777",
+      "name": "Evaluate Latency & Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL || 'https://hooks.slack.placeholder/services/T00000000/B00000000/LATENCY_ALERT_HOOK' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\": \"🟢 Uptime Check Passed: {{ $json.target }} responded with HTTP {{ $json.status_code }} at {{ $json.checked_at }}.\"}",
+        "options": {}
+      },
+      "id": "44444444-5555-6666-7777-888888888888",
+      "name": "Log Uptime Metric",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Cron (5m) Trigger": {
+      "main": [
+        [
+          {
+            "node": "Probe Health Endpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Probe Health Endpoint": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Latency & Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Latency & Status": {
+      "main": [
+        [
+          {
+            "node": "Log Uptime Metric",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "errorWorkflow": "e2c342f0-104c-4a37-b4d4-5397f0a71ad1"
+  },
+  "meta": {
+    "instanceId": "cb321a50a00632a7bb7d5d2ab0724806a77ad2f254b1f8ebf9bf6e72c842b104"
+  }
+}
