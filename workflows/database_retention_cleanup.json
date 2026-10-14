@@ -1,0 +1,120 @@
+{
+  "name": "Database Retention & Execution Cleanup",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "value": [
+            {
+              "mode": "everyDay",
+              "hour": 2,
+              "minute": 0
+            }
+          ]
+        }
+      },
+      "id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+      "name": "Cron Daily (02:00 UTC)",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM execution_entity WHERE \"stoppedAt\" < NOW() - INTERVAL '30 days' RETURNING id;"
+      },
+      "id": "d2b3c4d5-e6f7-8a9b-0c1d-2e3f4a5b6c7d",
+      "name": "Prune Old Executions",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dummy_postgres_credential_id",
+          "name": "Production Database"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prunedItems = items || [];\nconst count = prunedItems.length;\nconst timestamp = new Date().toISOString();\n\nreturn {\n  json: {\n    status: \"success\",\n    pruned_count: count,\n    retention_days: 30,\n    executed_at: timestamp\n  }\n};"
+      },
+      "id": "e3c4d5e6-f7a8-9b0c-1d2e-3f4a5b6c7d8e",
+      "name": "Aggregate Cleanup Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL || 'https://hooks.slack.placeholder/services/T00000000/B00000000/CLEANUP_ALERT_HOOK' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\": \"🧹 Execution Log Pruning Completed\\n*Pruned Records:* {{ $json.pruned_count }}\\n*Retention Window:* {{ $json.retention_days }} days\\n*Executed At:* {{ $json.executed_at }}\"}",
+        "options": {}
+      },
+      "id": "f4d5e6f7-a8b9-0c1d-2e3f-4a5b6c7d8e9f",
+      "name": "Slack Retention Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Cron Daily (02:00 UTC)": {
+      "main": [
+        [
+          {
+            "node": "Prune Old Executions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prune Old Executions": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Cleanup Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Cleanup Metrics": {
+      "main": [
+        [
+          {
+            "node": "Slack Retention Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "errorWorkflow": "e2c342f0-104c-4a37-b4d4-5397f0a71ad1"
+  },
+  "meta": {
+    "instanceId": "cb321a50a00632a7bb7d5d2ab0724806a77ad2f254b1f8ebf9bf6e72c842b104"
+  }
+}
