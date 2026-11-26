@@ -134,6 +134,11 @@ services:
       - QUEUE_BULL_REDIS_PASSWORD=${QUEUE_BULL_REDIS_PASSWORD}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE:-true}
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_METRICS=${N8N_METRICS:-true}
+      - EXECUTIONS_DATA_PRUNE=${EXECUTIONS_DATA_PRUNE:-true}
+      - EXECUTIONS_DATA_MAX_AGE=${EXECUTIONS_DATA_MAX_AGE:-336}
     volumes:
       - n8n_storage:/home/node/.n8n
     healthcheck:
@@ -185,6 +190,11 @@ services:
       - QUEUE_BULL_REDIS_PASSWORD=${QUEUE_BULL_REDIS_PASSWORD}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE:-true}
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS:-true}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_METRICS=${N8N_METRICS:-true}
+      - EXECUTIONS_DATA_PRUNE=${EXECUTIONS_DATA_PRUNE:-true}
+      - EXECUTIONS_DATA_MAX_AGE=${EXECUTIONS_DATA_MAX_AGE:-336}
     volumes:
       - n8n_storage:/home/node/.n8n
     depends_on:
@@ -219,7 +229,7 @@ services:
       - PGPASSWORD=${DB_POSTGRESDB_PASSWORD:-secure-db-password-change-me}
       - PGDATABASE=${DB_POSTGRESDB_DATABASE:-n8n_db}
       - PGHOST=postgres
-      - BACKUP_INTERVAL=86400 # 24 hours in seconds
+      - BACKUP_INTERVAL=${BACKUP_INTERVAL:-86400} # 24 hours in seconds
     volumes:
       - db_backups:/backups
     entrypoint: |
@@ -230,18 +240,23 @@ services:
         echo "Creating database backup...";
         FILENAME="/backups/n8n_db_backup_$$(date +%Y%m%d_%H%M%S).sql.gz";
         if pg_isready -h $$PGHOST -U $$PGUSER -d $$PGDATABASE; then
-          pg_dump -h $$PGHOST -U $$PGUSER -d $$PGDATABASE > /tmp/backup.sql;
-          if [ $$? -eq 0 ]; then
+          if pg_dump -h $$PGHOST -U $$PGUSER -d $$PGDATABASE > /tmp/backup.sql; then
             gzip -9 -f /tmp/backup.sql;
-            mv /tmp/backup.sql.gz $$FILENAME;
-            echo "Backup created successfully: $$FILENAME";
+            if gzip -t /tmp/backup.sql.gz; then
+              mv /tmp/backup.sql.gz "$$FILENAME";
+              echo "Backup created and verified: $$FILENAME";
+            else
+              rm -f /tmp/backup.sql.gz;
+              echo "ERROR: Backup gzip integrity check failed!";
+            fi
           else
+            rm -f /tmp/backup.sql;
             echo "ERROR: pg_dump failed! Database backup aborted.";
           fi
         else
           echo "ERROR: PostgreSQL is not ready. Database backup aborted.";
         fi
-        # Keep only the last 7 backups to save disk space
+        # Keep only the last 7 days of backups to save disk space
         find /backups -name "n8n_db_backup_*.sql.gz" -mtime +7 -delete;
       done'
     depends_on:
