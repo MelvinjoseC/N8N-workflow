@@ -10,6 +10,12 @@ repos:
         args: ['--maxkb=1000']
       - id: check-merge-conflict
 
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+
   - repo: local
     hooks:
       - id: lint-workflows
@@ -19,9 +25,16 @@ repos:
         files: ^workflows/.*\.json$
         pass_filenames: true
 
+      - id: validate-env-template
+        name: Validate .env.example Schema
+        entry: python scripts/validate_env.py --env-file .env.example --example-file .env.example --allow-placeholders
+        language: system
+        files: ^\.env\.example$
+        pass_filenames: false
+
       - id: run-tests
         name: Run Unit Tests
-        entry: python -m unittest discover -s tests
+        entry: pytest -q
         language: system
         files: ^(scripts|tests)/.*\.py$
         pass_filenames: false
