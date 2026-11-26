@@ -36,18 +36,24 @@ graph TD
 ├── docs/
 │   └── adr/
 │       ├── 0001-gitops-workflow-sync-architecture.md # Architecture decision: GitOps workflow
-│       └── 0002-scaling-n8n-with-redis-queue-mode.md # Architecture decision: Bull queue scaling
+│       ├── 0002-scaling-n8n-with-redis-queue-mode.md # Architecture decision: Bull queue scaling
+│       └── 0003-container-security-and-image-pinning.md # Architecture decision: Container hardening
+│   └── RUNBOOK.md                      # Production operations & incident recovery runbook
 ├── scripts/
+│   ├── n8n_client.py                   # Shared n8n REST API v1 client (retries, pagination)
 │   ├── lint_workflows.py               # Custom workflow linter with color, JUnit/JSON reporting
-│   ├── deploy_workflows.py             # Syncs local workflows to n8n API with dry-run and retries
+│   ├── deploy_workflows.py             # Syncs local workflows to n8n API with diff, lint & backup
 │   ├── export_workflows.py             # Bidirectional sync: exports remote workflows to repo
-│   ├── validate_env.py                 # Audits .env for insecure defaults and missing variables
+│   ├── validate_env.py                 # Audits .env for insecure defaults, strength & HTTPS
+│   ├── healthcheck.py                  # Probes n8n, Gotenberg, PostgreSQL, and Redis health
 │   └── restore_db.sh                   # Disaster recovery script for gzipped postgres dumps
 ├── tests/
+│   ├── test_n8n_client.py              # Unit tests for shared n8n REST API client
 │   ├── test_lint_workflows.py          # Unit test suite for workflow linter
 │   ├── test_deploy_workflows.py        # Unit test suite for deployment script
 │   ├── test_export_workflows.py        # Unit test suite for workflow exporter
-│   └── test_validate_env.py            # Unit test suite for environment validator
+│   ├── test_validate_env.py            # Unit test suite for environment validator
+│   └── test_healthcheck.py             # Unit test suite for stack healthcheck probe
 ├── workflows/
 │   ├── global_error_handler.json       # Centralized incident handler for Slack alerting
 │   ├── lead_generation_crm_sync.json   # Webhook lead qualification & HubSpot CRM routing
@@ -129,31 +135,37 @@ All workflows designate the **Global Error Handler** (`global_error_handler.json
 ## 🛠️ Developer Tooling & CLI Commands
 
 ### Makefile Shortcuts
-- **`make lint`**: Runs workflow linter with ANSI color output.
-- **`make test`**: Executes complete Python test suite via `pytest`.
-- **`make audit-env`**: Verifies `.env` against production rules.
+- **`make lint`**: Runs workflow linter with `--fail-on-warnings`.
+- **`make lint-code` / `make format`**: Runs Ruff static analysis and auto-formatting.
+- **`make security`**: Runs Bandit AST security scan across `scripts/`.
+- **`make test` / `make test-cov`**: Executes Python test suite with branch coverage enforcement.
+- **`make audit-env`**: Verifies `.env` against production rules (`--strict`).
+- **`make healthcheck`**: Probes n8n and Gotenberg health endpoints.
+- **`make deploy-dry`**: Simulates deployment with pre-deploy linting.
 - **`make export`**: Exports workflows from live n8n instance into `workflows/`.
-- **`make up` / `make down`**: Controls dockerized stack lifecycle.
+- **`make up` / `make up-queue` / `make down`**: Controls dockerized stack lifecycle.
 - **`make backup`**: Manually creates a compressed PostgreSQL backup.
 - **`make clean`**: Removes pytest and Python temporary cache files.
 
 ### Workflow Linter (`scripts/lint_workflows.py`)
 Configured via `.n8n-lint.json`:
 - **Secret Scanning:** Flags suspected API tokens and passwords while allowing `{{ $env.VAR }}` expressions.
-- **Error Routing:** Enforces designation of `errorWorkflow`.
-- **Resilience:** Flags HTTP nodes missing explicit `timeout` settings.
+- **TLS & Code Security:** Flags `allowUnauthorizedCerts=true` and `process.env` access in Code nodes.
+- **Error Routing & Graph Integrity:** Enforces `errorWorkflow`, unique node names, valid connections, and detects orphan nodes.
+- **Resilience:** Flags HTTP nodes missing explicit `timeout` or below `minHttpTimeoutMs`.
 - **Deprecations:** Checks node `typeVersion >= 1`.
-- **Connection Integrity:** Verifies all graph links connect existing nodes.
-- **Reporting:** Supports `--format text|json|junit` and `--output FILE` for CI dashboards.
+- **Reporting:** Supports `--format text|json|junit` (with XML escaping) and `--output FILE` for CI dashboards.
 
 ### Deployment Script (`scripts/deploy_workflows.py`)
-- **`--dry-run`**: Simulates deployment without modifying remote state.
+- **`--dry-run` / `--diff`**: Simulates deployment and previews unified diffs against remote state.
+- **`--lint`**: Runs pre-deploy workflow linting before mutating remote n8n.
 - **`--backup-dir <dir>`**: Automatically downloads pre-deploy remote backups before overwriting.
-- **Git Metadata Stamping:** Injects git commit hash and deploy timestamp into workflow tags/metadata.
-- **Resilient Networking:** Retries on transient 502/503/504 errors with exponential backoff.
+- **Git Metadata Stamping:** Injects git commit hash and deploy timestamp into workflow metadata.
+- **Resilient Networking:** Powered by `scripts/n8n_client.py` with exponential backoff + jitter on transient 429/5xx errors.
 
 ### Database Recovery (`scripts/restore_db.sh`)
 ```bash
+./scripts/restore_db.sh --dry-run /backups/n8n_db_backup_20261014.sql.gz
 ./scripts/restore_db.sh /backups/n8n_db_backup_20261014.sql.gz
 ```
-Verifies gzip archive integrity, closes active database connections, restores schemas, and validates table counts.
+Verifies gzip archive integrity, closes active database connections, restores schemas with `ON_ERROR_STOP=1`, and validates table counts. See [docs/RUNBOOK.md](docs/RUNBOOK.md) for full operational procedures.

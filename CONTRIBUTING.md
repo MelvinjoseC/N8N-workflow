@@ -53,12 +53,11 @@ pip install pre-commit
 pre-commit install
 ```
 
-### 2. Run Python Unit Tests
-We maintain comprehensive unit test coverage with pytest across deployment, linting, export, and audit utilities:
+### 2. Run Python Unit Tests & Coverage
+We maintain unit test coverage with pytest and Ruff across deployment, linting, export, healthcheck, and audit utilities:
 ```bash
-make test
-# OR
-pytest
+make test-cov
+make lint-code
 ```
 
 ### 3. Lint Workflow Exports

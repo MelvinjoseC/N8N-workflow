@@ -20,7 +20,8 @@ We take the security of our workflows and infrastructure configurations seriousl
 ## Hardening Recommendations
 
 This repository provides production-hardened boilerplate. Ensure you enforce the following in production:
-- Replace all placeholder values in `.env` with strong, randomly generated keys.
-- Do not expose port `5678` directly to the internet; always route traffic through a secure reverse proxy (e.g., Traefik, Nginx) with SSL/TLS termination.
+- Replace all placeholder values in `.env` with strong, randomly generated keys (12+ chars for passwords, 16+ chars for `N8N_ENCRYPTION_KEY`).
+- Pin container image tags (`N8N_IMAGE_TAG`, `GOTENBERG_IMAGE_TAG`) and keep `no-new-privileges:true` enabled.
+- Keep `N8N_BIND_ADDR=127.0.0.1` and do not expose port `5678` or Gotenberg port `3000` directly to the internet; always route traffic through a secure reverse proxy (e.g., Traefik, Nginx) with SSL/TLS termination.
 - Set `N8N_BASIC_AUTH_ACTIVE=true` (or use active OAuth2/SAML credentials integrations) to secure the dashboard.
 - Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=true` to prevent unauthorized workflow scripts from reading host/container environment variables.
