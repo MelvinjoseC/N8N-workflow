@@ -4,12 +4,18 @@ Validates environment configuration (.env) against .env.example.
 Audits for missing required keys, unrotated placeholder passwords, and weak encryption keys.
 """
 
+import argparse
+import json
 import os
 import sys
-import re
-import argparse
 
 PLACEHOLDER_SUBSTRINGS = ["change-me", "example.com", "dummy", "replace-me"]
+PASSWORD_KEYS = (
+    "DB_POSTGRESDB_PASSWORD",
+    "QUEUE_BULL_REDIS_PASSWORD",
+    "N8N_BASIC_AUTH_PASSWORD",
+)
+MIN_PASSWORD_LENGTH = 12
 
 def parse_env_file(filepath):
     """
@@ -57,10 +63,25 @@ def audit_environment(env_dict, example_dict, allow_placeholders=False):
             if len(val) < 16:
                 errors.append(f"'N8N_ENCRYPTION_KEY' is too short ({len(val)} chars). Minimum 16 characters required for AES security.")
 
+        # Check password strength in production
+        if not allow_placeholders and key in PASSWORD_KEYS:
+            if len(val) < MIN_PASSWORD_LENGTH:
+                errors.append(
+                    f"'{key}' is too short ({len(val)} chars). Minimum {MIN_PASSWORD_LENGTH} characters required."
+                )
+
         # Check webhook URL validity
         if key == "WEBHOOK_URL":
             if not val.startswith("http://") and not val.startswith("https://"):
                 warnings.append(f"'WEBHOOK_URL' ({val}) does not begin with http:// or https://.")
+            elif env_dict.get("NODE_ENV", "").lower() == "production" and val.startswith("http://"):
+                warnings.append("'WEBHOOK_URL' uses insecure http:// while NODE_ENV=production. Use https://.")
+
+    if env_dict.get("NODE_ENV", "").lower() == "production":
+        if env_dict.get("N8N_PROTOCOL", "").lower() == "http":
+            warnings.append("'N8N_PROTOCOL' is set to http in production; https is recommended.")
+        if env_dict.get("N8N_BLOCK_ENV_ACCESS_IN_NODE", "true").lower() != "true":
+            warnings.append("'N8N_BLOCK_ENV_ACCESS_IN_NODE' should be 'true' in production.")
 
     return errors, warnings
 
