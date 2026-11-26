@@ -2,7 +2,7 @@ name: Lint n8n Workflows
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'feature/**' ]
   pull_request:
     branches: [ main, master ]
 
@@ -24,4 +24,11 @@ jobs:
 
     - name: Run Workflow Linter
       run: |
-        python scripts/lint_workflows.py workflows/
+        python scripts/lint_workflows.py workflows/ --fail-on-warnings --format junit --output n8n-lint-report.xml
+
+    - name: Upload Lint Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: n8n-lint-junit-report
+        path: n8n-lint-report.xml
