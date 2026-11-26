@@ -15,7 +15,10 @@ DEFAULT_CONFIG = {
         "checkHttpTimeout": True,
         "checkTypeVersion": True,
         "scanHardcodedSecrets": True,
-        "validateConnections": True
+        "validateConnections": True,
+        "checkTlsVerify": True,
+        "checkOrphanNodes": True,
+        "checkCodeEnvAccess": True
     },
     "secretKeywords": ["key", "secret", "password", "token", "auth", "pwd"],
     "excludedSecretValues": ["dummy", "test", "localhost", "127.0.0.1", "none"],
@@ -142,10 +145,10 @@ def check_workflow_file(filepath, config=None):
                 if auth == "none":
                     warnings.append(f"Webhook Node '{name}' does not configure authentication. Webhook will be publicly accessible.")
 
-        # Rule 4b: Check HTTP Request nodes for explicit timeout configuration
-        if rules.get("checkHttpTimeout", True):
-            if node_type == "n8n-nodes-base.httpRequest":
-                options = node.get("parameters", {}).get("options", {})
+        # Rule 4b: Check HTTP Request nodes for explicit timeout configuration and TLS bypass
+        if node_type == "n8n-nodes-base.httpRequest":
+            options = node.get("parameters", {}).get("options", {})
+            if rules.get("checkHttpTimeout", True):
                 if not isinstance(options, dict) or "timeout" not in options:
                     warnings.append(f"HTTP Request Node '{name}' has no explicit timeout configured. Default or missing timeouts can cause hung executions.")
                 else:
@@ -155,6 +158,11 @@ def check_workflow_file(filepath, config=None):
                         warnings.append(
                             f"HTTP Request Node '{name}' timeout ({timeout_val}ms) is below minimum threshold ({min_timeout_ms}ms)."
                         )
+            if rules.get("checkTlsVerify", True):
+                if isinstance(options, dict) and options.get("allowUnauthorizedCerts") is True:
+                    errors.append(
+                        f"HTTP Request Node '{name}' disables TLS certificate verification (allowUnauthorizedCerts=true)."
+                    )
 
         # Rule 4c: Check for deprecated or invalid node typeVersion (< 1)
         if rules.get("checkTypeVersion", True):
