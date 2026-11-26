@@ -58,7 +58,7 @@
         "url": "={{ $env.SLACK_WEBHOOK_URL || 'https://hooks.slack.placeholder/services/T00000000/B00000000/LATENCY_ALERT_HOOK' }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"text\": \"🟢 Uptime Check Passed: {{ $json.target }} responded with HTTP {{ $json.status_code }} at {{ $json.checked_at }}.\"}",
+        "jsonBody": "={\"text\": \"\ud83d\udfe2 Uptime Check Passed: {{ $json.target }} responded with HTTP {{ $json.status_code }} at {{ $json.checked_at }}.\"}",
         "options": {
           "timeout": 10000
         }
@@ -110,7 +110,10 @@
   },
   "active": true,
   "settings": {
-    "errorWorkflow": "e2c342f0-104c-4a37-b4d4-5397f0a71ad1"
+    "errorWorkflow": "e2c342f0-104c-4a37-b4d4-5397f0a71ad1",
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
   },
   "meta": {
     "instanceId": "cb321a50a00632a7bb7d5d2ab0724806a77ad2f254b1f8ebf9bf6e72c842b104"
