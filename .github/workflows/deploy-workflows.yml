@@ -5,6 +5,13 @@ on:
     branches: [ main, master ]
     paths:
       - 'workflows/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Simulate deployment without modifying remote workflows'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -22,9 +29,17 @@ jobs:
       with:
         python-version: '3.12'
 
+    - name: Pre-Deploy Workflow Lint
+      run: |
+        python scripts/lint_workflows.py workflows/ --fail-on-warnings
+
     - name: Sync Workflows to n8n
       env:
         N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
         N8N_API_URL: ${{ secrets.N8N_API_URL }}
       run: |
-        python scripts/deploy_workflows.py workflows/
+        DRY_FLAG=""
+        if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          DRY_FLAG="--dry-run"
+        fi
+        python scripts/deploy_workflows.py workflows/ --lint $DRY_FLAG
