@@ -1,13 +1,14 @@
-import unittest
-from unittest.mock import patch, MagicMock, mock_open
+import io
 import os
 import sys
+import unittest
 import urllib.error
-import io
+from unittest.mock import MagicMock, mock_open, patch
 
 # Add scripts directory to path to import deploy_workflows
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
 import deploy_workflows
+
 
 class TestDeployWorkflows(unittest.TestCase):
     def setUp(self):
@@ -67,17 +68,17 @@ class TestDeployWorkflows(unittest.TestCase):
     def test_deploy_workflow_new_without_id(self, mock_urlopen, mock_check_exists):
         # Workflow JSON without an ID
         workflow_json = '{"name": "New Workflow", "nodes": [], "connections": {}}'
-        
+
         mock_resp = MagicMock()
         mock_resp.read.return_value = b'{"id": "new-wf-999", "name": "New Workflow"}'
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         with patch('builtins.open', mock_open(read_data=workflow_json)):
             success = deploy_workflows.deploy_workflow(self.api_url, self.headers, "dummy_path.json")
-            
+
         self.assertTrue(success)
         mock_check_exists.assert_not_called()
-        
+
         # Verify POST request details
         req_arg = mock_urlopen.call_args[0][0]
         self.assertEqual(req_arg.method, "POST")
@@ -88,19 +89,19 @@ class TestDeployWorkflows(unittest.TestCase):
     def test_deploy_workflow_update_existing(self, mock_urlopen, mock_check_exists):
         # Workflow JSON with an ID
         workflow_json = '{"id": "wf-existing-111", "name": "Existing Workflow", "nodes": [], "connections": {}}'
-        
+
         mock_check_exists.return_value = True
-        
+
         mock_resp = MagicMock()
         mock_resp.read.return_value = b'{"id": "wf-existing-111", "name": "Existing Workflow"}'
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         with patch('builtins.open', mock_open(read_data=workflow_json)):
             success = deploy_workflows.deploy_workflow(self.api_url, self.headers, "dummy_path.json")
-            
+
         self.assertTrue(success)
         mock_check_exists.assert_called_once_with(self.api_url, self.headers, "wf-existing-111")
-        
+
         # Verify PUT request details
         req_arg = mock_urlopen.call_args[0][0]
         self.assertEqual(req_arg.method, "PUT")
@@ -111,19 +112,19 @@ class TestDeployWorkflows(unittest.TestCase):
     def test_deploy_workflow_new_with_unregistered_id(self, mock_urlopen, mock_check_exists):
         # Workflow has an ID but is not on the target n8n instance
         workflow_json = '{"id": "wf-new-222", "name": "New Workflow with ID", "nodes": [], "connections": {}}'
-        
+
         mock_check_exists.return_value = False
-        
+
         mock_resp = MagicMock()
         mock_resp.read.return_value = b'{"id": "wf-new-222", "name": "New Workflow with ID"}'
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         with patch('builtins.open', mock_open(read_data=workflow_json)):
             success = deploy_workflows.deploy_workflow(self.api_url, self.headers, "dummy_path.json")
-            
+
         self.assertTrue(success)
         mock_check_exists.assert_called_once_with(self.api_url, self.headers, "wf-new-222")
-        
+
         # Verify POST request details (it should POST to workflows/ to register the new ID)
         req_arg = mock_urlopen.call_args[0][0]
         self.assertEqual(req_arg.method, "POST")

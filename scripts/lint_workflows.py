@@ -58,26 +58,26 @@ def is_hardcoded_secret(value, excluded_values=None):
     """
     if not isinstance(value, str):
         return False
-    
+
     # Ignore n8n expressions
     if value.startswith("=") or ("{{" in value and "}}" in value):
         return False
-        
+
     # Ignore empty or extremely short values
     if len(value.strip()) < 5:
         return False
-        
+
     # Check if value matches standard dummy placeholders
     val_lower = value.lower()
     excluded = excluded_values if excluded_values is not None else EXCLUDED_VALUES
     for dummy in excluded:
         if dummy in val_lower:
             return False
-            
+
     # Check if value looks like a hex token or high entropy string
     if re.match(r'^[a-zA-Z0-9_\-]{16,}$', value):
         return True
-        
+
     return False
 
 def check_workflow_file(filepath, config=None):
@@ -87,13 +87,13 @@ def check_workflow_file(filepath, config=None):
     """
     if config is None:
         config = load_config()
-        
+
     rules = config.get("rules", {})
     cred_keywords = config.get("secretKeywords", CRED_KEYWORDS)
     excluded_values = config.get("excludedSecretValues", EXCLUDED_VALUES)
     errors = []
     warnings = []
-    
+
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             workflow = json.load(f)
@@ -101,16 +101,16 @@ def check_workflow_file(filepath, config=None):
         return [f"Invalid JSON format: {str(e)}"], []
     except Exception as e:
         return [f"Failed to read file: {str(e)}"], []
-        
+
     # Check core structure
     if "nodes" not in workflow:
         errors.append("Missing core 'nodes' array.")
         return errors, warnings
-        
+
     nodes = workflow.get("nodes", [])
     connections = workflow.get("connections", {})
     settings = workflow.get("settings", {})
-    
+
     # Rule 1: Check if errorWorkflow is configured
     if rules.get("requireErrorWorkflow", True):
         if "errorWorkflow" not in settings or not settings["errorWorkflow"]:
@@ -120,12 +120,12 @@ def check_workflow_file(filepath, config=None):
                 warnings.append("No 'errorWorkflow' configured in settings. Centralized error handling is recommended.")
 
     node_names = set()
-    
+
     # Traverse nodes
     for node in nodes:
         name = node.get("name", "Unnamed Node")
         node_type = node.get("type", "unknown")
-        
+
         # Rule 2: Ensure unique node names
         if rules.get("checkUniqueNodeNames", True):
             if name in node_names:
@@ -133,7 +133,7 @@ def check_workflow_file(filepath, config=None):
             node_names.add(name)
         else:
             node_names.add(name)
-        
+
         # Rule 3: Detect disabled nodes (debugging leftovers)
         if rules.get("detectDisabledNodes", True):
             if node.get("disabled") is True:
@@ -186,19 +186,19 @@ def check_workflow_file(filepath, config=None):
                     )
 
 
-        
+
         # Rule 5: Inspect parameters for hardcoded secrets
         parameters = node.get("parameters", {})
-        
+
         def inspect_dict(d, path=""):
             for k, v in d.items():
                 current_path = f"{path}.{k}" if path else k
-                
+
                 # Check for sensitive key names containing values
                 if isinstance(v, str) and any(keyword in k.lower() for keyword in cred_keywords):
                     if is_hardcoded_secret(v, excluded_values=excluded_values):
                         errors.append(f"Node '{name}': Suspected hardcoded credential in parameter '{current_path}' (value starts with '{v[:4]}...')")
-                        
+
                 elif isinstance(v, dict):
                     inspect_dict(v, current_path)
                 elif isinstance(v, list):
@@ -208,7 +208,7 @@ def check_workflow_file(filepath, config=None):
 
         if rules.get("scanHardcodedSecrets", True):
             inspect_dict(parameters)
-        
+
     # Rule 6: Validate connections (no orphaned or undefined nodes referenced)
     connected_nodes = set()
     if rules.get("validateConnections", True):
@@ -216,7 +216,7 @@ def check_workflow_file(filepath, config=None):
             connected_nodes.add(source_node)
             if source_node not in node_names:
                 errors.append(f"Connections reference a source node '{source_node}' that does not exist in the 'nodes' array.")
-                
+
             for conn_type, paths in conn_types.items():
                 for path in paths:
                     for target in path:
@@ -251,7 +251,7 @@ def generate_report(results, report_format="text", output_file=None):
     """
     total_errors = sum(len(r["errors"]) for r in results)
     total_warnings = sum(len(r["warnings"]) for r in results)
-    
+
     if report_format == "json":
         data = {
             "summary": {
@@ -281,7 +281,7 @@ def generate_report(results, report_format="text", output_file=None):
     if output_file and content:
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
-            
+
     return content
 
 def main():
@@ -294,10 +294,10 @@ def main():
     parser.add_argument("--format", choices=["text", "json", "junit"], default="text", help="Output report format (text, json, junit)")
     parser.add_argument("--output", "-o", default=None, help="Save report output to specified file path")
     args = parser.parse_args()
-        
+
     config = load_config(args.config)
     files_to_check = []
-    
+
     if os.path.isfile(args.target_path):
         files_to_check.append(args.target_path)
     elif os.path.isdir(args.target_path):
@@ -309,14 +309,14 @@ def main():
     else:
         print(colorize(f"Error: Target path '{args.target_path}' does not exist.", "31"))
         sys.exit(1)
-        
+
     results = []
     total_errors = 0
     total_warnings = 0
-    
+
     if not args.quiet and args.format == "text":
         print(colorize(f"Linting {len(files_to_check)} workflow file(s)...", "36"))
-    
+
     for filepath in files_to_check:
         filename = os.path.basename(filepath)
         errors, warnings = check_workflow_file(filepath, config=config)
@@ -327,10 +327,10 @@ def main():
             "warnings": warnings,
             "passed": len(errors) == 0
         })
-        
+
         if not args.quiet and args.format == "text":
             print(f"\nChecking [{colorize(filename, '1')}]...")
-        
+
         if not errors and not warnings:
             if not args.quiet and args.format == "text":
                 print(f"  [{colorize('OK', '32')}] Passed validation.")
@@ -347,13 +347,13 @@ def main():
     report_str = generate_report(results, report_format=args.format, output_file=args.output)
     if args.format in ["json", "junit"] and not args.output:
         print(report_str)
-                
+
     if args.format == "text" and (not args.quiet or total_errors > 0 or total_warnings > 0):
         print("\n" + "="*40)
         status_color = "32" if total_errors == 0 else "31"
         print(f"Lint Summary: {colorize(str(total_errors) + ' error(s)', status_color)}, {colorize(str(total_warnings) + ' warning(s)', '33' if total_warnings else '32')} found.")
         print("="*40)
-    
+
     if total_errors > 0 or (args.fail_on_warnings and total_warnings > 0):
         if args.format == "text":
             print("\n" + colorize("Linting FAILED. Please resolve issues.", "31"))

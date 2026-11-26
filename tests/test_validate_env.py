@@ -1,11 +1,12 @@
-import unittest
 import os
 import sys
 import tempfile
+import unittest
 
 # Add scripts directory to path to import validate_env
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
 import validate_env
+
 
 class TestValidateEnv(unittest.TestCase):
     def setUp(self):

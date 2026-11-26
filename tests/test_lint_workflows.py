@@ -1,12 +1,13 @@
-import unittest
-import os
-import tempfile
 import json
+import os
 import sys
+import tempfile
+import unittest
 
 # Add scripts directory to path to import lint_workflows
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts')))
 import lint_workflows
+
 
 class TestLintWorkflows(unittest.TestCase):
     def setUp(self):
