@@ -170,6 +170,20 @@ def check_workflow_file(filepath, config=None):
             if type_version is not None and isinstance(type_version, (int, float)) and type_version < 1:
                 warnings.append(f"Node '{name}' uses invalid typeVersion ({type_version}). Version must be >= 1.")
 
+        # Rule 4d: Check Code/Function nodes for process.env usage (blocked in hardened n8n)
+        if rules.get("checkCodeEnvAccess", True):
+            if node_type in (
+                "n8n-nodes-base.code",
+                "n8n-nodes-base.function",
+                "n8n-nodes-base.functionItem",
+            ):
+                params = node.get("parameters", {})
+                code_body = params.get("jsCode") or params.get("functionCode") or ""
+                if isinstance(code_body, str) and "process.env" in code_body:
+                    warnings.append(
+                        f"Code Node '{name}' references 'process.env', which fails when N8N_BLOCK_ENV_ACCESS_IN_NODE=true."
+                    )
+
 
         
         # Rule 5: Inspect parameters for hardcoded secrets
