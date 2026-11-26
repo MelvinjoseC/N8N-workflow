@@ -17,6 +17,8 @@ services:
     image: postgres:15-alpine
     container_name: n8n-postgres
     restart: always
+    security_opt:
+      - no-new-privileges:true
     environment:
       - POSTGRES_DB=${DB_POSTGRESDB_DATABASE:-n8n_db}
       - POSTGRES_USER=${DB_POSTGRESDB_USER:-n8n_user}
@@ -47,6 +49,8 @@ services:
     image: redis:7-alpine
     container_name: n8n-redis
     restart: always
+    security_opt:
+      - no-new-privileges:true
     command: redis-server --requirepass ${QUEUE_BULL_REDIS_PASSWORD:-secure-redis-password-change-me}
     volumes:
       - redis_storage:/data
@@ -74,8 +78,10 @@ services:
     image: gotenberg/gotenberg:${GOTENBERG_IMAGE_TAG:-8.11}
     container_name: n8n-gotenberg
     restart: always
+    security_opt:
+      - no-new-privileges:true
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 15s
@@ -101,8 +107,10 @@ services:
     image: n8nio/n8n:${N8N_IMAGE_TAG:-1.68.0}
     container_name: n8n-app
     restart: always
+    security_opt:
+      - no-new-privileges:true
     ports:
-      - "${N8N_PORT:-5678}:5678"
+      - "${N8N_BIND_ADDR:-127.0.0.1}:${N8N_PORT:-5678}:5678"
     environment:
       - N8N_HOST=${N8N_HOST:-localhost}
       - N8N_PORT=5678
@@ -159,6 +167,8 @@ services:
     image: postgres:15-alpine
     container_name: n8n-db-backup
     restart: always
+    security_opt:
+      - no-new-privileges:true
     environment:
       - PGUSER=${DB_POSTGRESDB_USER:-n8n_user}
       - PGPASSWORD=${DB_POSTGRESDB_PASSWORD:-secure-db-password-change-me}
