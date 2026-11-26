@@ -90,6 +90,8 @@ def main():
     parser.add_argument("--env-file", default=".env", help="Path to target .env file")
     parser.add_argument("--example-file", default=".env.example", help="Path to reference .env.example template")
     parser.add_argument("--allow-placeholders", action="store_true", help="Allow placeholder values (for testing/CI)")
+    parser.add_argument("--json", action="store_true", dest="json_output", help="Emit audit results as JSON")
+    parser.add_argument("--strict", action="store_true", help="Treat warnings as errors")
     args = parser.parse_args()
 
     if not os.path.exists(args.env_file):
@@ -104,6 +106,22 @@ def main():
     example_vars = parse_env_file(args.example_file)
 
     errors, warnings = audit_environment(env_vars, example_vars, allow_placeholders=args.allow_placeholders)
+    failed = bool(errors) or (args.strict and bool(warnings))
+
+    if args.json_output:
+        print(
+            json.dumps(
+                {
+                    "env_file": args.env_file,
+                    "example_file": args.example_file,
+                    "passed": not failed,
+                    "errors": errors,
+                    "warnings": warnings,
+                },
+                indent=2,
+            )
+        )
+        sys.exit(1 if failed else 0)
 
     print(f"Auditing '{args.env_file}' against '{args.example_file}'...")
     for w in warnings:
@@ -115,7 +133,7 @@ def main():
     print(f"Audit Summary: {len(errors)} error(s), {len(warnings)} warning(s).")
     print("=" * 40)
 
-    if errors:
+    if failed:
         print("\nEnvironment audit FAILED. Insecure or missing variables found.")
         sys.exit(1)
     else:
