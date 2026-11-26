@@ -56,6 +56,9 @@ class TestLintWorkflows(unittest.TestCase):
                     }
                 }
             ],
+            "connections": {
+                "Start": {"main": [[{"node": "HTTP Request", "type": "main", "index": 0}]]}
+            },
             "settings": {
                 "errorWorkflow": "error-workflow-uuid-123"
             }
@@ -314,6 +317,86 @@ class TestLintWorkflows(unittest.TestCase):
         junit_report = lint_workflows.generate_report(results, report_format="junit")
         self.assertIn("<testsuite", junit_report)
         self.assertIn("Sample Error", junit_report)
+
+    def test_http_min_timeout_threshold_warning(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Too Fast HTTP",
+                    "type": "n8n-nodes-base.httpRequest",
+                    "parameters": {"options": {"timeout": 200}},
+                }
+            ],
+            "settings": {"errorWorkflow": "err-id"},
+        }
+        filepath = self.create_temp_workflow("http_min_timeout", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertEqual(len(errors), 0)
+        self.assertTrue(any("below minimum threshold" in w for w in warnings))
+
+    def test_http_tls_bypass_error(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Insecure HTTP",
+                    "type": "n8n-nodes-base.httpRequest",
+                    "parameters": {"options": {"timeout": 5000, "allowUnauthorizedCerts": True}},
+                }
+            ],
+            "settings": {"errorWorkflow": "err-id"},
+        }
+        filepath = self.create_temp_workflow("tls_bypass", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertTrue(any("allowUnauthorizedCerts" in e for e in errors))
+
+    def test_orphan_node_warning_ignores_sticky_notes(self):
+        data = {
+            "nodes": [
+                {"name": "Trigger", "type": "n8n-nodes-base.manualTrigger"},
+                {"name": "Connected", "type": "n8n-nodes-base.set"},
+                {"name": "Orphan", "type": "n8n-nodes-base.set"},
+                {"name": "Note", "type": "n8n-nodes-base.stickyNote"},
+            ],
+            "connections": {
+                "Trigger": {"main": [[{"node": "Connected", "type": "main", "index": 0}]]}
+            },
+            "settings": {"errorWorkflow": "err-id"},
+        }
+        filepath = self.create_temp_workflow("orphan_node", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertEqual(len(errors), 0)
+        self.assertTrue(any("Orphan" in w and "orphan node" in w for w in warnings))
+        self.assertFalse(any("Note" in w for w in warnings))
+
+    def test_code_node_process_env_warning(self):
+        data = {
+            "nodes": [
+                {
+                    "name": "Code",
+                    "type": "n8n-nodes-base.code",
+                    "parameters": {"jsCode": "return [{ key: process.env.SECRET }];"},
+                }
+            ],
+            "settings": {"errorWorkflow": "err-id"},
+        }
+        filepath = self.create_temp_workflow("code_env", data)
+        errors, warnings = lint_workflows.check_workflow_file(filepath)
+        self.assertEqual(len(errors), 0)
+        self.assertTrue(any("process.env" in w for w in warnings))
+
+    def test_junit_xml_escaping(self):
+        results = [
+            {
+                "file": 'bad<"wf">.json',
+                "filepath": 'workflows/bad<"wf">.json',
+                "errors": ["Error with <tag> & 'quotes'"],
+                "warnings": [],
+                "passed": False,
+            }
+        ]
+        junit_report = lint_workflows.generate_report(results, report_format="junit")
+        self.assertIn("&lt;tag&gt; &amp;", junit_report)
+        self.assertIn("&quot;wf&quot;", junit_report)
 
 if __name__ == "__main__":
     unittest.main()
