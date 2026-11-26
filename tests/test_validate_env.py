@@ -70,5 +70,29 @@ class TestValidateEnv(unittest.TestCase):
         self.assertEqual(len(errors), 0)
         self.assertEqual(len(warnings), 0)
 
+    def test_audit_weak_password_length(self):
+        env_dict = {
+            "DB_POSTGRESDB_PASSWORD": "short",
+            "N8N_ENCRYPTION_KEY": "c092a4e93f77341209bca7f912cd34ef",
+        }
+        example_dict = {"DB_POSTGRESDB_PASSWORD": "x", "N8N_ENCRYPTION_KEY": "y"}
+        errors, _ = validate_env.audit_environment(env_dict, example_dict, allow_placeholders=False)
+        self.assertTrue(any("DB_POSTGRESDB_PASSWORD" in e and "too short" in e for e in errors))
+
+    def test_audit_production_http_and_env_block_warnings(self):
+        env_dict = {
+            "NODE_ENV": "production",
+            "N8N_PROTOCOL": "http",
+            "WEBHOOK_URL": "http://n8n.company.internal/",
+            "N8N_BLOCK_ENV_ACCESS_IN_NODE": "false",
+            "N8N_ENCRYPTION_KEY": "c092a4e93f77341209bca7f912cd34ef",
+        }
+        example_dict = {"NODE_ENV": "production", "N8N_ENCRYPTION_KEY": "x"}
+        errors, warnings = validate_env.audit_environment(env_dict, example_dict, allow_placeholders=False)
+        self.assertEqual(len(errors), 0)
+        self.assertTrue(any("insecure http://" in w for w in warnings))
+        self.assertTrue(any("N8N_PROTOCOL" in w for w in warnings))
+        self.assertTrue(any("N8N_BLOCK_ENV_ACCESS_IN_NODE" in w for w in warnings))
+
 if __name__ == "__main__":
     unittest.main()
