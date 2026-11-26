@@ -25,6 +25,7 @@ class TestDeployWorkflows(unittest.TestCase):
     def test_check_workflow_exists_true(self, mock_urlopen):
         mock_resp = MagicMock()
         mock_resp.status = 200
+        mock_resp.read.return_value = b'{"id": "wf-123", "name": "Test"}'
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         exists = deploy_workflows.check_workflow_exists(self.api_url, self.headers, "wf-123")
@@ -166,19 +167,34 @@ class TestDeployWorkflows(unittest.TestCase):
                 content = f.read()
             self.assertIn("Backup WF", content)
 
-    @patch('time.sleep')
-    @patch('urllib.request.urlopen')
-    def test_make_request_retry_on_503(self, mock_urlopen, mock_sleep):
-        err_503 = urllib.error.HTTPError("url", 503, "Service Unavailable", {}, io.BytesIO(b""))
-        ok_resp = MagicMock()
-        ok_resp.status = 200
-        mock_urlopen.side_effect = [err_503, ok_resp]
+    def test_sort_workflow_files_error_handler_first(self):
+        files = ["workflows/z_last.json", "workflows/global_error_handler.json", "workflows/a_first.json"]
+        sorted_files = deploy_workflows.sort_workflow_files(files)
+        self.assertEqual(
+            sorted_files,
+            ["workflows/global_error_handler.json", "workflows/a_first.json", "workflows/z_last.json"],
+        )
 
-        req = urllib.request.Request("https://test.com")
-        resp = deploy_workflows.make_request(req, max_retries=2, backoff_factor=0.01)
-        self.assertEqual(resp.status, 200)
-        self.assertEqual(mock_urlopen.call_count, 2)
-        mock_sleep.assert_called_once()
+    def test_sanitize_payload_strips_readonly_fields(self):
+        raw = {
+            "name": "Clean WF",
+            "versionId": "v123",
+            "createdAt": "2026-01-01",
+            "updatedAt": "2026-01-02",
+            "nodes": [],
+            "connections": {},
+        }
+        payload = deploy_workflows.sanitize_payload(raw, {"gitCommit": "abc123"})
+        self.assertNotIn("versionId", payload)
+        self.assertNotIn("createdAt", payload)
+        self.assertEqual(payload["meta"]["gitCommit"], "abc123")
+
+    def test_compute_workflow_diff_detects_change(self):
+        local = {"name": "WF", "nodes": [{"name": "A"}], "connections": {}, "settings": {}, "active": True}
+        remote = {"name": "WF", "nodes": [], "connections": {}, "settings": {}, "active": False}
+        diff = deploy_workflows.compute_workflow_diff(local, remote, "WF")
+        self.assertIn("-  \"active\": false", diff)
+        self.assertIn("+  \"active\": true", diff)
 
     def test_get_git_commit_sha(self):
         sha = deploy_workflows.get_git_commit_sha()

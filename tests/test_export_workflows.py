@@ -76,5 +76,36 @@ class TestExportWorkflows(unittest.TestCase):
         self.assertTrue(os.path.exists(active_file))
         self.assertFalse(os.path.exists(inactive_file))
 
+    @patch('export_workflows.fetch_all_workflows')
+    def test_export_workflows_tag_filter_and_sanitize(self, mock_fetch):
+        mock_fetch.return_value = [
+            {
+                "id": "wf-1",
+                "name": "Tagged WF",
+                "nodes": [],
+                "active": True,
+                "tags": [{"name": "production"}],
+                "meta": {"gitCommit": "abc", "deployedAt": "2026-01-01T00:00:00Z"},
+            },
+            {
+                "id": "wf-2",
+                "name": "Untagged WF",
+                "nodes": [],
+                "active": True,
+                "tags": [],
+            },
+        ]
+
+        count = export_workflows.export_workflows(
+            self.api_url, self.headers, self.test_dir.name, tag_filter="production"
+        )
+        self.assertEqual(count, 1)
+        exported_path = os.path.join(self.test_dir.name, "tagged_wf.json")
+        self.assertTrue(os.path.exists(exported_path))
+        with open(exported_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        self.assertNotIn("deployedAt", data["meta"])
+        self.assertEqual(data["meta"]["gitCommit"], "abc")
+
 if __name__ == "__main__":
     unittest.main()
