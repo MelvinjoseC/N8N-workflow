@@ -2,7 +2,7 @@ name: Run Tests
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'feature/**' ]
   pull_request:
     branches: [ main, master ]
 
@@ -29,8 +29,12 @@ jobs:
     - name: Install Test Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest
+        pip install pytest pytest-cov ruff
 
-    - name: Run Pytest Suite
+    - name: Lint Python Code with Ruff
       run: |
-        pytest -v
+        ruff check scripts/ tests/
+
+    - name: Run Pytest Suite with Coverage
+      run: |
+        pytest -v --cov=scripts --cov-report=term-missing --cov-fail-under=60
