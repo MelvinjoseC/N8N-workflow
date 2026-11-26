@@ -1,205 +1,275 @@
 #!/usr/bin/env python3
-import os
-import sys
+"""Sync local n8n workflow JSON files with a target n8n instance."""
+
+from __future__ import annotations
+
+import argparse
 import glob
 import json
-import urllib.request
-import urllib.error
-import argparse
-
+import logging
+import os
+import shutil
+import subprocess  # nosec B404
+import sys
 import time
+from typing import Any
 
-DEFAULT_TIMEOUT = 30
-RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+from n8n_client import DEFAULT_TIMEOUT, N8nApiClient, N8nApiError
 
-def get_api_credentials(api_key_env, api_url_env):
-    api_key = os.environ.get(api_key_env)
-    api_url = os.environ.get(api_url_env)
-    return api_key, api_url
+logger = logging.getLogger(__name__)
 
-def make_request(req, timeout=DEFAULT_TIMEOUT, max_retries=3, backoff_factor=1.0):
-    """
-    Executes an urllib request with timeout and exponential backoff retry logic.
-    """
-    retries = 0
-    while True:
-        try:
-            return urllib.request.urlopen(req, timeout=timeout)
-        except urllib.error.HTTPError as e:
-            if e.code in RETRY_STATUS_CODES and retries < max_retries:
-                retries += 1
-                sleep_time = backoff_factor * (2 ** (retries - 1))
-                time.sleep(sleep_time)
-                continue
-            raise
-        except (urllib.error.URLError, TimeoutError) as e:
-            if retries < max_retries:
-                retries += 1
-                sleep_time = backoff_factor * (2 ** (retries - 1))
-                time.sleep(sleep_time)
-                continue
-            raise
 
-def check_workflow_exists(api_url, headers, workflow_id, timeout=DEFAULT_TIMEOUT):
-    check_url = f"{api_url.rstrip('/')}/workflows/{workflow_id}"
-    req = urllib.request.Request(check_url, headers=headers, method='GET')
+def get_api_credentials(
+    api_key_env: str, api_url_env: str
+) -> tuple[str | None, str | None]:
+    """Retrieve API credentials from environment variables."""
+    return os.environ.get(api_key_env), os.environ.get(api_url_env)
+
+
+def _client_from_headers(api_url: str, headers: dict[str, str]) -> N8nApiClient:
+    api_key = headers.get("X-N8N-API-KEY", "")
+    return N8nApiClient(api_url=api_url, api_key=api_key, timeout=DEFAULT_TIMEOUT)
+
+
+def check_workflow_exists(
+    api_url: str,
+    headers: dict[str, str],
+    workflow_id: str,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> bool:
+    """Return True if workflow_id exists on the remote n8n instance."""
     try:
-        with make_request(req, timeout=timeout, max_retries=2, backoff_factor=0.2) as resp:
-            if resp.status == 200:
-                return True
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return False
-        print(f"HTTP Error checking workflow {workflow_id}: {e.code} - {e.reason}")
-    except Exception as e:
-        print(f"Error checking workflow {workflow_id}: {str(e)}")
+        client = N8nApiClient(
+            api_url=api_url,
+            api_key=headers.get("X-N8N-API-KEY", "dummy"),
+            timeout=timeout,
+            max_retries=2,
+            backoff_factor=0.2,
+        )
+        return client.get_workflow(workflow_id) is not None
+    except N8nApiError as exc:
+        logger.error("HTTP error checking workflow %s: %s", workflow_id, exc)
+    except Exception as exc:
+        logger.error("Error checking workflow %s: %s", workflow_id, exc)
     return False
 
-def backup_remote_workflow(api_url, headers, workflow_id, backup_dir):
-    """
-    Downloads existing remote workflow JSON and saves to backup_dir before overwrite.
-    """
+
+def backup_remote_workflow(
+    api_url: str,
+    headers: dict[str, str],
+    workflow_id: str,
+    backup_dir: str | None,
+) -> str | None:
+    """Download existing remote workflow JSON and save to backup_dir before overwrite."""
     if not backup_dir:
         return None
     os.makedirs(backup_dir, exist_ok=True)
-    fetch_url = f"{api_url.rstrip('/')}/workflows/{workflow_id}"
-    req = urllib.request.Request(fetch_url, headers=headers, method='GET')
     try:
-        with make_request(req, timeout=DEFAULT_TIMEOUT) as resp:
-            data = resp.read().decode('utf-8')
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
-            backup_file = os.path.join(backup_dir, f"{workflow_id}_{timestamp}.json")
-            with open(backup_file, 'w', encoding='utf-8') as f:
-                f.write(data)
-            print(f"Pre-deploy backup created: {backup_file}")
-            return backup_file
-    except Exception as e:
-        print(f"Warning: Failed to create pre-deploy backup for {workflow_id}: {e}")
+        client = _client_from_headers(api_url, headers)
+        remote = client.get_workflow(workflow_id)
+        if remote is None:
+            return None
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        backup_file = os.path.join(backup_dir, f"{workflow_id}_{timestamp}.json")
+        with open(backup_file, "w", encoding="utf-8") as f:
+            json.dump(remote, f, indent=2)
+            f.write("\n")
+        logger.info("Pre-deploy backup created: %s", backup_file)
+        return backup_file
+    except Exception as exc:
+        logger.warning(
+            "Failed to create pre-deploy backup for %s: %s", workflow_id, exc
+        )
         return None
 
-import subprocess
 
-def get_git_commit_sha():
-    """
-    Returns short git commit SHA if available, otherwise None.
-    """
+def get_git_commit_sha() -> str | None:
+    """Return short git commit SHA if available, otherwise None."""
+    git_bin = shutil.which("git")
+    if not git_bin:
+        return None
     try:
-        res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True)
+        res = subprocess.run(  # nosec B603
+            [git_bin, "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         return res.stdout.strip()
     except Exception:
         return None
 
-def deploy_workflow(api_url, headers, filepath, dry_run=False, backup_dir=None, git_commit=None):
+
+def sort_workflow_files(files: list[str]) -> list[str]:
+    """Sort workflow files deterministically, deploying global_error_handler first."""
+    return sorted(
+        files,
+        key=lambda p: (
+            0 if os.path.basename(p) == "global_error_handler.json" else 1,
+            os.path.basename(p),
+        ),
+    )
+
+
+def deploy_workflow(
+    api_url: str,
+    headers: dict[str, str],
+    filepath: str,
+    dry_run: bool = False,
+    backup_dir: str | None = None,
+    git_commit: str | None = None,
+) -> bool:
+    """Deploy a single workflow JSON file to the target n8n instance."""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            workflow_data = json.load(f)
-    except Exception as e:
-        print(f"Error reading {filepath}: {str(e)}")
+        with open(filepath, "r", encoding="utf-8") as f:
+            workflow_data: dict[str, Any] = json.load(f)
+    except Exception as exc:
+        logger.error("Error reading %s: %s", filepath, exc)
         return False
 
-    name = workflow_data.get('name')
+    name = workflow_data.get("name")
     if not name:
-        print(f"Error: Workflow in {filepath} is missing a name.")
+        logger.error("Workflow in %s is missing a 'name' field.", filepath)
         return False
 
-    meta = workflow_data.get('meta', {}).copy()
+    meta = dict(workflow_data.get("meta", {}))
     commit_sha = git_commit or get_git_commit_sha()
     if commit_sha:
-        meta['gitCommit'] = commit_sha
-        meta['deployedAt'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        meta["gitCommit"] = commit_sha
+        meta["deployedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    payload = {
-        'name': name,
-        'nodes': workflow_data.get('nodes', []),
-        'connections': workflow_data.get('connections', {}),
-        'settings': workflow_data.get('settings', {}),
-        'active': workflow_data.get('active', False),
-        'meta': meta
+    payload: dict[str, Any] = {
+        "name": name,
+        "nodes": workflow_data.get("nodes", []),
+        "connections": workflow_data.get("connections", {}),
+        "settings": workflow_data.get("settings", {}),
+        "active": workflow_data.get("active", False),
+        "meta": meta,
     }
-    if 'tags' in workflow_data:
-        payload['tags'] = workflow_data['tags']
+    if "tags" in workflow_data:
+        payload["tags"] = workflow_data["tags"]
 
-    workflow_id = workflow_data.get('id')
-    base_url = api_url.rstrip('/')
-    url = f"{base_url}/workflows"
-    method = 'POST'
+    workflow_id = workflow_data.get("id")
+    client = _client_from_headers(api_url, headers)
+    is_update = False
 
     if workflow_id:
         exists = check_workflow_exists(api_url, headers, workflow_id)
         if exists:
             if dry_run:
-                print(f"[DRY-RUN] Workflow '{name}' (ID: {workflow_id}) exists on target. Would perform UPDATE (PUT).")
+                logger.info(
+                    "[DRY-RUN] Workflow '%s' (ID: %s) exists. Would UPDATE (PUT).",
+                    name,
+                    workflow_id,
+                )
                 return True
             if backup_dir:
                 backup_remote_workflow(api_url, headers, workflow_id, backup_dir)
-            print(f"Workflow ID {workflow_id} exists on target. Performing UPDATE (PUT).")
-            url = f"{base_url}/workflows/{workflow_id}"
-            method = 'PUT'
+            logger.info("Workflow ID %s exists. Performing UPDATE (PUT).", workflow_id)
+            is_update = True
         else:
             if dry_run:
-                print(f"[DRY-RUN] Workflow '{name}' (ID: {workflow_id}) not found on target. Would perform CREATE (POST).")
+                logger.info(
+                    "[DRY-RUN] Workflow '%s' (ID: %s) not found. Would CREATE (POST).",
+                    name,
+                    workflow_id,
+                )
                 return True
-            print(f"Workflow ID {workflow_id} not found on target. Creating NEW (POST) with original ID.")
-            payload['id'] = workflow_id
+            logger.info(
+                "Workflow ID %s not found. Creating NEW (POST) with original ID.",
+                workflow_id,
+            )
+            payload["id"] = workflow_id
     elif dry_run:
-        print(f"[DRY-RUN] Workflow '{name}' has no ID. Would perform CREATE (POST).")
+        logger.info("[DRY-RUN] Workflow '%s' has no ID. Would CREATE (POST).", name)
         return True
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode('utf-8'),
-        headers=headers,
-        method=method
-    )
-
     try:
-        with make_request(req, timeout=DEFAULT_TIMEOUT) as resp:
-            result = json.loads(resp.read().decode('utf-8'))
-            print(f"Successfully deployed: {result.get('name')} (ID: {result.get('id')})")
-            return True
-    except urllib.error.HTTPError as e:
-        print(f"Failed to deploy workflow {name}: {e.code} - {e.reason}")
-        try:
-            print(e.read().decode('utf-8'))
-        except Exception:
-            pass
-    except Exception as e:
-        print(f"Unexpected error deploying workflow {name}: {str(e)}")
+        if is_update and workflow_id:
+            result = client.update_workflow(workflow_id, payload)
+        else:
+            result = client.create_workflow(payload)
+        logger.info(
+            "Successfully deployed: %s (ID: %s)", result.get("name"), result.get("id")
+        )
+        return True
+    except N8nApiError as exc:
+        logger.error("Failed to deploy workflow %s: %s", name, exc)
+        if exc.body:
+            logger.error("Response body: %s", exc.body)
+    except Exception as exc:
+        logger.error("Unexpected error deploying workflow %s: %s", name, exc)
     return False
 
-def main():
-    parser = argparse.ArgumentParser(description="Sync local JSON workflows with target n8n instance.")
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Sync local JSON workflows with target n8n instance."
+    )
     parser.add_argument("directory", help="Directory containing JSON workflows")
-    parser.add_argument("--key-env", default="N8N_API_KEY", help="Environment variable name for API key")
-    parser.add_argument("--url-env", default="N8N_API_URL", help="Environment variable name for API URL")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate deployment actions without modifying remote n8n instance")
-    parser.add_argument("--backup-dir", default=None, help="Directory to store pre-deploy backups of remote workflows")
+    parser.add_argument(
+        "--key-env", default="N8N_API_KEY", help="Env var name for API key"
+    )
+    parser.add_argument(
+        "--url-env", default="N8N_API_URL", help="Env var name for API URL"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Simulate deployment actions without modifying remote n8n instance",
+    )
+    parser.add_argument(
+        "--backup-dir",
+        default=None,
+        help="Directory to store pre-deploy backups of remote workflows",
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable debug logging"
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
 
     api_key, api_url = get_api_credentials(args.key_env, args.url_env)
     if not api_key or not api_url:
-        print(f"Error: API Credentials missing ({args.key_env} or {args.url_env} not set).")
+        logger.error(
+            "API Credentials missing (%s or %s not set).", args.key_env, args.url_env
+        )
         sys.exit(1)
 
     headers = {
-        'X-N8N-API-KEY': api_key,
-        'Content-Type': 'application/json'
+        "X-N8N-API-KEY": api_key,
+        "Content-Type": "application/json",
     }
 
-    workflow_files = glob.glob(os.path.join(args.directory, '*.json'))
+    workflow_files = sort_workflow_files(
+        glob.glob(os.path.join(args.directory, "*.json"))
+    )
     mode_str = " (DRY-RUN MODE)" if args.dry_run else ""
-    print(f"Found {len(workflow_files)} workflows to deploy{mode_str}.")
+    logger.info("Found %d workflows to deploy%s.", len(workflow_files), mode_str)
 
     success_count = 0
     for file in workflow_files:
-        print(f"\nProcessing {file}...")
-        if deploy_workflow(api_url, headers, file, dry_run=args.dry_run, backup_dir=args.backup_dir):
+        logger.info("Processing %s...", file)
+        if deploy_workflow(
+            api_url,
+            headers,
+            file,
+            dry_run=args.dry_run,
+            backup_dir=args.backup_dir,
+        ):
             success_count += 1
 
-    print(f"\nDeployment complete: {success_count}/{len(workflow_files)} workflows processed.")
-    if success_count < len(workflow_files):
-        sys.exit(1)
-    sys.exit(0)
+    logger.info(
+        "Deployment complete: %d/%d workflows processed.",
+        success_count,
+        len(workflow_files),
+    )
+    sys.exit(0 if success_count == len(workflow_files) else 1)
+
 
 if __name__ == "__main__":
     main()
