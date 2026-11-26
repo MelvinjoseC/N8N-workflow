@@ -195,8 +195,10 @@ def check_workflow_file(filepath, config=None):
             inspect_dict(parameters)
         
     # Rule 6: Validate connections (no orphaned or undefined nodes referenced)
+    connected_nodes = set()
     if rules.get("validateConnections", True):
         for source_node, conn_types in connections.items():
+            connected_nodes.add(source_node)
             if source_node not in node_names:
                 errors.append(f"Connections reference a source node '{source_node}' that does not exist in the 'nodes' array.")
                 
@@ -204,8 +206,22 @@ def check_workflow_file(filepath, config=None):
                 for path in paths:
                     for target in path:
                         target_node = target.get("node")
-                        if target_node and target_node not in node_names:
-                            errors.append(f"Connection from '{source_node}' references target node '{target_node}' which does not exist in the 'nodes' array.")
+                        if target_node:
+                            connected_nodes.add(target_node)
+                            if target_node not in node_names:
+                                errors.append(f"Connection from '{source_node}' references target node '{target_node}' which does not exist in the 'nodes' array.")
+
+    # Rule 7: Detect disconnected/orphan nodes in multi-node workflows
+    if rules.get("checkOrphanNodes", True) and len(nodes) > 1:
+        for node in nodes:
+            node_name = node.get("name", "Unnamed Node")
+            node_type = node.get("type", "")
+            if node_type == "n8n-nodes-base.stickyNote":
+                continue
+            if node_name not in connected_nodes:
+                warnings.append(
+                    f"Node '{node_name}' is disconnected (orphan node) and will never execute."
+                )
 
     return errors, warnings
 
