@@ -71,7 +71,7 @@ services:
       - n8n-network
 
   gotenberg:
-    image: gotenberg/gotenberg:7
+    image: gotenberg/gotenberg:${GOTENBERG_IMAGE_TAG:-8.11}
     container_name: n8n-gotenberg
     restart: always
     ports:
@@ -98,7 +98,7 @@ services:
 
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:${N8N_IMAGE_TAG:-1.68.0}
     container_name: n8n-app
     restart: always
     ports:
