@@ -148,6 +148,13 @@ def check_workflow_file(filepath, config=None):
                 options = node.get("parameters", {}).get("options", {})
                 if not isinstance(options, dict) or "timeout" not in options:
                     warnings.append(f"HTTP Request Node '{name}' has no explicit timeout configured. Default or missing timeouts can cause hung executions.")
+                else:
+                    min_timeout_ms = config.get("minHttpTimeoutMs", 1000)
+                    timeout_val = options.get("timeout")
+                    if isinstance(timeout_val, (int, float)) and timeout_val < min_timeout_ms:
+                        warnings.append(
+                            f"HTTP Request Node '{name}' timeout ({timeout_val}ms) is below minimum threshold ({min_timeout_ms}ms)."
+                        )
 
         # Rule 4c: Check for deprecated or invalid node typeVersion (< 1)
         if rules.get("checkTypeVersion", True):
