@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import glob
 import json
 import logging
@@ -14,6 +15,7 @@ import sys
 import time
 from typing import Any
 
+from lint_workflows import check_workflow_file, load_config
 from n8n_client import DEFAULT_TIMEOUT, N8nApiClient, N8nApiError
 
 logger = logging.getLogger(__name__)
@@ -111,6 +113,43 @@ def sort_workflow_files(files: list[str]) -> list[str]:
     )
 
 
+def sanitize_payload(workflow_data: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
+    """Build a clean n8n API payload stripping read-only server fields."""
+    payload: dict[str, Any] = {
+        "name": workflow_data["name"],
+        "nodes": workflow_data.get("nodes", []),
+        "connections": workflow_data.get("connections", {}),
+        "settings": workflow_data.get("settings", {}),
+        "active": workflow_data.get("active", False),
+        "meta": meta,
+    }
+    if "tags" in workflow_data:
+        payload["tags"] = workflow_data["tags"]
+    return payload
+
+
+def compute_workflow_diff(
+    local_payload: dict[str, Any],
+    remote_workflow: dict[str, Any],
+    name: str,
+) -> str:
+    """Return a unified diff between remote and local workflow definitions."""
+    comparable_keys = ("name", "nodes", "connections", "settings", "active")
+    remote_norm = {k: remote_workflow.get(k) for k in comparable_keys}
+    local_norm = {k: local_payload.get(k) for k in comparable_keys}
+
+    remote_lines = json.dumps(remote_norm, indent=2, sort_keys=True).splitlines(keepends=True)
+    local_lines = json.dumps(local_norm, indent=2, sort_keys=True).splitlines(keepends=True)
+    return "".join(
+        difflib.unified_diff(
+            remote_lines,
+            local_lines,
+            fromfile=f"remote/{name}",
+            tofile=f"local/{name}",
+        )
+    )
+
+
 def deploy_workflow(
     api_url: str,
     headers: dict[str, str],
@@ -118,6 +157,7 @@ def deploy_workflow(
     dry_run: bool = False,
     backup_dir: str | None = None,
     git_commit: str | None = None,
+    show_diff: bool = False,
 ) -> bool:
     """Deploy a single workflow JSON file to the target n8n instance."""
     try:
@@ -138,16 +178,7 @@ def deploy_workflow(
         meta["gitCommit"] = commit_sha
         meta["deployedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    payload: dict[str, Any] = {
-        "name": name,
-        "nodes": workflow_data.get("nodes", []),
-        "connections": workflow_data.get("connections", {}),
-        "settings": workflow_data.get("settings", {}),
-        "active": workflow_data.get("active", False),
-        "meta": meta,
-    }
-    if "tags" in workflow_data:
-        payload["tags"] = workflow_data["tags"]
+    payload = sanitize_payload(workflow_data, meta)
 
     workflow_id = workflow_data.get("id")
     client = _client_from_headers(api_url, headers)
@@ -156,6 +187,14 @@ def deploy_workflow(
     if workflow_id:
         exists = check_workflow_exists(api_url, headers, workflow_id)
         if exists:
+            if show_diff:
+                remote = client.get_workflow(workflow_id)
+                if remote is not None:
+                    diff_text = compute_workflow_diff(payload, remote, name)
+                    if diff_text:
+                        logger.info("Diff for '%s':\n%s", name, diff_text)
+                    else:
+                        logger.info("No changes detected for '%s'.", name)
             if dry_run:
                 logger.info(
                     "[DRY-RUN] Workflow '%s' (ID: %s) exists. Would UPDATE (PUT).",
@@ -224,6 +263,16 @@ def main() -> None:
         help="Directory to store pre-deploy backups of remote workflows",
     )
     parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Show unified diff against remote workflows before deploying",
+    )
+    parser.add_argument(
+        "--lint",
+        action="store_true",
+        help="Run workflow linter before deploying and abort on errors",
+    )
+    parser.add_argument(
         "--verbose", "-v", action="store_true", help="Enable debug logging"
     )
     args = parser.parse_args()
@@ -248,6 +297,20 @@ def main() -> None:
     workflow_files = sort_workflow_files(
         glob.glob(os.path.join(args.directory, "*.json"))
     )
+
+    if args.lint:
+        lint_cfg = load_config()
+        lint_failed = False
+        for wf_file in workflow_files:
+            errs, _ = check_workflow_file(wf_file, config=lint_cfg)
+            if errs:
+                lint_failed = True
+                for err in errs:
+                    logger.error("Lint error in %s: %s", wf_file, err)
+        if lint_failed:
+            logger.error("Pre-deploy lint check failed. Aborting deployment.")
+            sys.exit(1)
+
     mode_str = " (DRY-RUN MODE)" if args.dry_run else ""
     logger.info("Found %d workflows to deploy%s.", len(workflow_files), mode_str)
 
@@ -260,6 +323,7 @@ def main() -> None:
             file,
             dry_run=args.dry_run,
             backup_dir=args.backup_dir,
+            show_diff=args.diff,
         ):
             success_count += 1
 
