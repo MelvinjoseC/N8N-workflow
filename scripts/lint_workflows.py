@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import os
-import sys
-import json
-import re
 import argparse
+import json
+import os
+import re
+import sys
+from xml.sax.saxutils import escape as xml_escape
 
 # Suspected hardcoded credential patterns and default configuration
 DEFAULT_CONFIG = {
@@ -266,9 +267,10 @@ def generate_report(results, report_format="text", output_file=None):
         lines = ['<?xml version="1.0" encoding="UTF-8"?>']
         lines.append(f'<testsuite name="n8n-workflow-linter" tests="{len(results)}" failures="{total_errors}" errors="0">')
         for r in results:
-            lines.append(f'  <testcase classname="workflows" name="{r["file"]}">')
+            safe_name = xml_escape(str(r["file"]), {'"': "&quot;"})
+            lines.append(f'  <testcase classname="workflows" name="{safe_name}">')
             if r["errors"]:
-                msg = "; ".join(r["errors"])
+                msg = xml_escape("; ".join(r["errors"]))
                 lines.append(f'    <failure message="Validation failed">{msg}</failure>')
             lines.append('  </testcase>')
         lines.append('</testsuite>')
@@ -300,9 +302,10 @@ def main():
         files_to_check.append(args.target_path)
     elif os.path.isdir(args.target_path):
         for root, _, files in os.walk(args.target_path):
-            for file in files:
+            for file in sorted(files):
                 if file.endswith(".json"):
                     files_to_check.append(os.path.join(root, file))
+        files_to_check.sort()
     else:
         print(colorize(f"Error: Target path '{args.target_path}' does not exist.", "31"))
         sys.exit(1)
